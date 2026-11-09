@@ -45,7 +45,7 @@ class StremioClientTest {
         val client = StremioClient { url, _ ->
             JSONObject(if (url.endsWith("manifest.json"))
                 """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[$catalogs]}"""
-            else """{"metas":[{"id":"tt${url.substringAfter("catalog").substringBefore("/")}","name":"Movie"}]}""")
+            else """{"metas":[{"id":"tt${url.substringAfterLast("/catalog").substringBefore("/")}","name":"Movie"}]}""")
         }
         val addon = client.inspectAddon("https://example.org")
         assertEquals(8, client.catalog(addon, "Movie").size)
