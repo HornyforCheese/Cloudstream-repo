@@ -176,7 +176,12 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
         MutinyPanel("Catalog search") {
             OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Title search (if addon supports it)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { vm.searchCatalog(query) }, enabled = !busy && query.isNotBlank()) { Text("Search titles") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.searchCatalog(query) }, enabled = !busy && query.isNotBlank()) { Text("Search titles") }
+                OutlinedButton(onClick = { vm.searchCatalog("") }, enabled = !busy && addons.any { it.supportsCatalog }) {
+                    Text("Browse catalogs")
+                }
+            }
             catalog.take(40).forEach { item ->
                 Row(Modifier.fillMaxWidth().clickable { vm.loadStreams(item) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!item.poster.isNullOrBlank()) {
