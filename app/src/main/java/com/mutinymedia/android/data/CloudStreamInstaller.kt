@@ -8,6 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import org.json.JSONObject
 
 /** Downloads packages into private storage. Does not execute untrusted bytecode. */
 class CloudStreamInstaller(private val context: Context) {
@@ -43,7 +44,17 @@ class CloudStreamInstaller(private val context: Context) {
             } finally { connection.disconnect() }
             require(temp.length() > 0) { "Empty extension" }
             ZipFile(temp).use { zip ->
-                require(zip.getEntry("manifest.json") != null) { "Not a CloudStream extension: manifest.json missing" }
+                val entry = zip.getEntry("manifest.json")
+                    ?: error("Not a CloudStream extension: manifest.json missing")
+                require(entry.size in 1..65_536) { "Invalid extension manifest size" }
+                val manifest = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                val data = JSONObject(manifest)
+                require(data.optString("pluginClassName").isNotBlank()) {
+                    "CloudStream extension manifest has no pluginClassName"
+                }
+                require(zip.getEntry("classes.dex") != null) {
+                    "CloudStream extension has no executable classes.dex"
+                }
             }
             require(temp.renameTo(destination)) { "Could not save extension package" }
             id
