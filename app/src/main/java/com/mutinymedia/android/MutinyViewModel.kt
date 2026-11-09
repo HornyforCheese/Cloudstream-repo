@@ -37,6 +37,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
     private val openrouter = OpenRouterClient()
+    private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
+    val debridAccount = MutableStateFlow<String?>(null)
     val settings: StateFlow<UserSettings> = store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings())
     val addons = MutableStateFlow<List<Addon>>(emptyList())
     val watchlist: StateFlow<List<MediaItem>> = store.watchlist.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -180,6 +182,29 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         streams.value = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
             .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
         if (streams.value.isEmpty()) message.value = "No streams returned by connected providers"
+    }
+    fun saveRealDebridKey(token: String) = runJob {
+        if (token.isBlank()) {
+            secrets.saveSecret("debrid_real_debrid", "")
+            debridAccount.value = null
+            message.value = "Real-Debrid API key removed"
+        } else {
+            val username = realDebrid.verify(token.trim())
+            secrets.saveSecret("debrid_real_debrid", token.trim())
+            debridAccount.value = username
+            message.value = "Real-Debrid connected as $username"
+        }
+    }
+    fun verifyRealDebrid() = runJob {
+        val token = secrets.readSecret("debrid_real_debrid") ?: error("No Real-Debrid key saved")
+        debridAccount.value = realDebrid.verify(token)
+        message.value = "Real-Debrid connection verified"
+    }
+    fun playViaRealDebrid(stream: StreamOption) = runJob {
+        val token = secrets.readSecret("debrid_real_debrid") ?: error("Add a Real-Debrid key under Settings → Integrations → Debrid Services")
+        val link = stream.url ?: error("This stream does not provide a supported hoster link")
+        val direct = realDebrid.resolve(token, link)
+        activeStream.value = stream.copy(url = direct, provider = "Real-Debrid")
     }
     fun play(stream: StreamOption) {
         if (!stream.playable) { message.value = "This source requires a torrent/debrid engine that is not integrated yet"; return }
