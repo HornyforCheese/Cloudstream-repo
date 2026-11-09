@@ -32,7 +32,8 @@ class CloudStreamRegistry {
             val raw = lists.optString(i)
             if (raw.isBlank()) continue
             val listUrl = Network.validateHttps(URL(URL(repositoryUrl), raw).toString())
-            val plugins = Network.getJson(listUrl, 2_000_000).optJSONArray("plugins") ?: continue
+            val rawJson = Network.getText(listUrl, 2_000_000).trim()
+            val plugins = if (rawJson.startsWith("[")) JSONArray(rawJson) else JSONObject(rawJson).optJSONArray("plugins") ?: continue
             for (j in 0 until minOf(plugins.length(), 500)) {
                 val item = plugins.optJSONObject(j) ?: continue
                 val name = item.optString("name")
