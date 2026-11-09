@@ -78,6 +78,33 @@ class AccountApiTest {
         val active=client.verify(NuvioSession(NuvioServer("https://nuvio.example",publicKey),"expired","old-refresh",0,"user-fixture","user@example.invalid",2))
         assertEquals("new-access",active.access);assertEquals("new-refresh",active.refresh);assertEquals(2,active.profile)
     }
+    @Test fun nuvioExpiredAccessTokenRefreshesAndVerifiesNewIdentity() = runBlocking {
+        var userChecks = 0
+        val client = NuvioAccountAdapter(AccountTransport { _, url, headers, _ ->
+            when {
+                url.contains("grant_type=refresh_token") -> AccountReply(200, auth("renewed-access", "renewed-refresh"))
+                url.endsWith("/auth/v1/user") -> {
+                    userChecks++
+                    if (headers["Authorization"] == "Bearer expired-access") AccountReply(401, "{}")
+                    else AccountReply(200, """{"id":"user-fixture","email":"user@example.invalid"}""")
+                }
+                else -> error("Unexpected request")
+            }
+        })
+        val saved = NuvioSession(NuvioServer("https://nuvio.example", publicKey),
+            "expired-access", "old-refresh", Long.MAX_VALUE, "user-fixture", "user@example.invalid")
+        assertEquals("renewed-access", client.verify(saved).access)
+        assertEquals(2, userChecks)
+    }
+    @Test fun nuvioRejectsIdentityMismatchAfterRefresh() = runBlocking {
+        val client = NuvioAccountAdapter(AccountTransport { _, url, _, _ ->
+            if (url.contains("grant_type=refresh_token")) AccountReply(200, auth())
+            else AccountReply(200, """{"id":"other-account"}""")
+        })
+        val saved = NuvioSession(NuvioServer("https://nuvio.example", publicKey),
+            "expired", "refresh", 0, "user-fixture", "user@example.invalid")
+        assertTrue(runCatching { client.verify(saved) }.isFailure)
+    }
     @Test fun nuvioRespectsProfilePinAndUsesPrimaryAddonSetting() = runBlocking {
         val client=NuvioAccountAdapter(AccountTransport { _,url,_,body ->
             when {
