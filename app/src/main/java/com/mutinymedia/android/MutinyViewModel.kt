@@ -37,7 +37,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
     private val cloudInstaller = com.mutinymedia.android.data.CloudStreamInstaller(application)
-    val installedCloudPlugins = MutableStateFlow(cloudInstaller.installed())
+    val installedCloudPlugins = MutableStateFlow(cloudInstaller.registeredPackages().keys)
     val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
     private val openrouter = OpenRouterClient()
     private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
@@ -137,7 +137,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun installCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
         cloudInstaller.install(plugin)
-        installedCloudPlugins.value = cloudInstaller.installed()
+        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
         message.value = "Downloaded ${plugin.name}. Execution requires CloudStream runtime compatibility."
     }
     fun uninstallCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
