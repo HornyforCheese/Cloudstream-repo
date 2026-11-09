@@ -23,7 +23,7 @@ class CloudStreamInstaller(private val context: Context) {
                     val manifest = zip.getEntry("manifest.json") ?: return@use
                     val dex = zip.getEntry("classes.dex") ?: return@use
                     if (dex.size == 0L) return@use
-                    val data = zip.getInputStream(manifest).bufferedReader().use { JSONObject(it.readText()) }
+                    val data = zip.getInputStream(manifest).use { JSONObject(Network.readLimited(it, 65_536)) }
                     val className = data.optString("pluginClassName")
                     if (className.isNotBlank()) put(file.nameWithoutExtension, className)
                 }
@@ -62,8 +62,8 @@ class CloudStreamInstaller(private val context: Context) {
             ZipFile(temp).use { zip ->
                 val entry = zip.getEntry("manifest.json")
                     ?: error("Not a CloudStream extension: manifest.json missing")
-                require(entry.size in 1..65_536) { "Invalid extension manifest size" }
-                val manifest = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                val manifest = zip.getInputStream(entry).use { input -> Network.readLimited(input, 65_536) }
+                require(manifest.isNotBlank()) { "Empty extension manifest" }
                 val data = JSONObject(manifest)
                 require(data.optString("pluginClassName").isNotBlank()) {
                     "CloudStream extension manifest has no pluginClassName"
