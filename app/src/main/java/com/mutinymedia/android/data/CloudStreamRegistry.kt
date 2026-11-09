@@ -38,6 +38,8 @@ class CloudStreamRegistry {
                 val item = plugins.optJSONObject(j) ?: continue
                 val name = item.optString("name")
                 val path = item.optString("url")
+                // CloudStream marks unavailable providers with status 0.
+                if (item.has("status") && item.optInt("status") == 0) continue
                 if (name.isBlank() || path.isBlank()) continue
                 val resolved = runCatching { Network.validateHttps(URL(URL(listUrl), path).toString()) }.getOrNull() ?: continue
                 result += CloudStreamPlugin(name, item.optString("description"), item.optInt("version"), resolved, repositoryUrl)
