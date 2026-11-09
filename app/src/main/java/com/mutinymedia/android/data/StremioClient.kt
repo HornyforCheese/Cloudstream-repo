@@ -42,7 +42,7 @@ class StremioClient(
         val manifest = fetch("${addon.baseUrl}/manifest.json", 500_000)
         val specs = manifest.optJSONArray("catalogs") ?: return emptyList()
         val all = mutableListOf<MediaItem>()
-        for (index in 0 until minOf(specs.length(), 5)) {
+        for (index in 0 until minOf(specs.length(), 30)) {
             val spec = specs.optJSONObject(index) ?: continue
             val type = spec.optString("type")
             val id = spec.optString("id")
@@ -66,7 +66,7 @@ class StremioClient(
                     type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"))
             }
         }
-        return all.distinctBy { it.type to it.id }.take(80)
+        return all.distinctBy { it.type to it.id }.take(300)
     }
     suspend fun episodes(addon: Addon, media: MediaItem): List<Episode> {
         if (!addon.supportsMeta) return emptyList()
