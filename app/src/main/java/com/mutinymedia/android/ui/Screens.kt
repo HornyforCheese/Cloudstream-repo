@@ -208,6 +208,21 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
             Button(onClick = { vm.lookup(type, directId, anime || directId.startsWith("kitsu:") || directId.startsWith("mal:")) },
                 enabled = !busy && directId.isNotBlank() && addons.isNotEmpty()) { Text("Find available streams") }
         }
+        if (current != null) {
+            MutinyPanel("Title details") {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    current!!.poster?.let { poster ->
+                        AsyncImage(model = poster, contentDescription = "${current!!.title} poster",
+                            modifier = Modifier.size(width = 96.dp, height = 144.dp), contentScale = ContentScale.Crop)
+                    }
+                    Column {
+                        Text(current!!.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(current!!.type.replaceFirstChar(Char::uppercase), color = MutedInk)
+                        current!!.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    }
+                }
+            }
+        }
         if (episodes.isNotEmpty()) {
             var season by remember(episodes) { mutableIntStateOf(episodes.first().season) }
             MutinyPanel("Choose an episode") {
