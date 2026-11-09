@@ -16,6 +16,25 @@ object CloudStreamSearchAdapter {
         val description: String? = null,
     )
 
+    /** Maps real CloudStream SearchResponse objects without depending on their binary ABI. */
+    fun fromHostResponses(provider: String, responses: List<Any>): List<MediaItem> {
+        fun property(instance: Any, name: String): String? = runCatching {
+            val getter = "get" + name.replaceFirstChar { it.uppercase() }
+            instance.javaClass.methods.firstOrNull { it.name == getter && it.parameterCount == 0 }
+                ?.invoke(instance)?.toString()
+        }.getOrNull()
+        return convert(responses.mapNotNull { item ->
+            val name = property(item, "name") ?: return@mapNotNull null
+            val url = property(item, "url") ?: return@mapNotNull null
+            val type = property(item, "type").orEmpty()
+            SearchResult(provider, name, url, when {
+                type.contains("anime", true) || item.javaClass.simpleName.contains("Anime") -> "anime"
+                type.contains("movie", true) -> "movie"
+                else -> "series"
+            }, property(item, "posterUrl"))
+        })
+    }
+
     fun convert(results: List<SearchResult>): List<MediaItem> =
         results.asSequence().filter { it.provider.isNotBlank() && it.title.isNotBlank() }
             .mapNotNull { item ->
