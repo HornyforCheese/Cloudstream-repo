@@ -70,7 +70,7 @@ fun HomeScreen(onBrowse: () -> Unit, onSettings: () -> Unit, onAI: () -> Unit, o
         }
         MutinyPanel("Development status") {
             Text("Native video playback, Stremio addon lookup, low-bandwidth controls, provider setup, direct downloads and installed-game launching are present in this starter.")
-            Text("Nuvio account sync, executable CloudStream plugins, torrent engines and Windows-specific modules require separate Android integrations.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+            Text("Account imports merge your Stremio/Nuvio addons and saved titles locally. Executable provider plugins, torrent engines and Windows-specific modules require separate integrations.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
         }
     }
 }

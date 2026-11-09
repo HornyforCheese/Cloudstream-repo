@@ -2,6 +2,9 @@ package com.mutinymedia.android
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.os.Build
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.view.View
@@ -76,10 +79,16 @@ class RuntimeSmokeTest {
         return null
     }
     private fun screenshot(name: String) {
-        val dir = target.getExternalFilesDir("Pictures")!!
-        dir.mkdirs()
-        InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let { bitmap ->
-            File(dir, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val bitmap=InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot() ?: return
+        if(Build.VERSION.SDK_INT >= 29) {
+            val values=ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME,"$name.png")
+                put(MediaStore.Images.Media.MIME_TYPE,"image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/MutinyRuntime")
+            }
+            target.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values)?.let { uri ->
+                target.contentResolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }
+            }
         }
     }
 
@@ -202,4 +211,73 @@ class RuntimeSmokeTest {
             screenshot("game-launched")
         } finally { shell("input keyevent 4") }
     }
+    private fun assertHttpsPlayback(url: String,label: String) {
+        val vm=model()
+        rule.runOnIdle { vm.play(StreamOption("https-$label", "$label HTTPS fixture",url,"Public test media")) }
+        lateinit var active: Player
+        rule.waitUntil(120_000) {
+            var found=false
+            rule.activityRule.scenario.onActivity { activity -> playerView(activity.window.decorView)?.player?.let { active=it;found=true } }
+            found
+        }
+        rule.waitUntil(180_000) {
+            var playing=false
+            rule.activityRule.scenario.onActivity {
+                active.playerError?.let { throw AssertionError("$label playback failed: ${it.errorCodeName}",it) }
+                playing=active.isPlaying && active.currentPosition>0
+            }
+            playing
+        }
+        screenshot("https-$label")
+        rule.onNodeWithText("Close").performClick()
+    }
+    @Test fun test06_publicStremioManifestCatalogAndEpisodes() = runBlocking {
+        val client=com.mutinymedia.android.data.StremioClient()
+        val addon=client.inspectAddon("https://v3-cinemeta.strem.io/manifest.json")
+        assertTrue(addon.supportsCatalog && addon.supportsMeta)
+        assertTrue(client.catalog(addon,"Big Buck Bunny").any { it.title.contains("Big Buck Bunny",true) })
+        val episodes=client.episodes(addon,MediaItem("tt0944947","series","Series fixture"))
+        assertTrue(episodes.isNotEmpty())
+        assertTrue(episodes.all { it.id.isNotBlank() })
+    }
+    @Test fun test07_httpsMp4Playback() = assertHttpsPlayback("https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4","mp4")
+    @Test fun test08_httpsHlsPlayback() = assertHttpsPlayback("https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8","hls")
+    @Test fun test09_httpsDashPlayback() = assertHttpsPlayback("https://storage.googleapis.com/shaka-demo-assets/angel-one/dash.mpd","dash")
+
+    @Test fun test10_stremioLoginScreenRejectsInvalidCredentials() {
+        val vm=model()
+        org.junit.Assume.assumeTrue(!vm.accounts.stremioStatus.value.saved && !vm.accounts.stremioStatus.value.connected)
+        nav("Settings")
+        rule.onNodeWithText("Stremio email").performScrollTo().performTextInput("mutiny-runtime-fixture@example.invalid")
+        rule.onNodeWithText("Stremio password").performScrollTo().performTextInput("not-a-real-password")
+        rule.onNodeWithText("Sign in to Stremio").performScrollTo().performClick()
+        rule.waitUntil(120_000) { !vm.busy.value && vm.accounts.stremioStatus.value.error!=null }
+        assertFalse(vm.accounts.stremioStatus.value.connected)
+        assertNull(vm.secrets.readSecret("stremio_session"))
+        screenshot("stremio-signin")
+    }
+    @Test fun test11_nuvioAdapterDiscoveryAndLoginScreen() {
+        val vm=model()
+        org.junit.Assume.assumeTrue(!vm.accounts.nuvioStatus.value.saved && !vm.accounts.nuvioStatus.value.connected)
+        nav("Settings")
+        rule.onNodeWithText("Nuvio email").performScrollTo().performTextInput("mutiny-runtime-fixture@example.invalid")
+        rule.onNodeWithText("Nuvio password").performScrollTo().performTextInput("not-a-real-password")
+        rule.onNodeWithText("Sign in to Nuvio").performScrollTo().performClick()
+        rule.waitUntil(120_000) { !vm.busy.value && vm.accounts.nuvioStatus.value.error!=null }
+        assertFalse(vm.accounts.nuvioStatus.value.connected)
+        assertNull(vm.secrets.readSecret("nuvio_session"))
+        screenshot("nuvio-signin")
+    }
+    @Test fun test12_stremioAuthKeyValidation() {
+        val vm=model()
+        org.junit.Assume.assumeTrue(!vm.accounts.stremioStatus.value.saved && !vm.accounts.stremioStatus.value.connected)
+        nav("Settings")
+        rule.onNodeWithText("Use an auth key instead").performScrollTo().performClick()
+        rule.onNodeWithText("Stremio auth key").performScrollTo().performTextInput("not-a-real-auth-key")
+        rule.onNodeWithText("Connect Stremio auth key").performScrollTo().performClick()
+        rule.waitUntil(120_000) { !vm.busy.value && vm.accounts.stremioStatus.value.error!=null }
+        assertFalse(vm.accounts.stremioStatus.value.connected)
+        assertNull(vm.secrets.readSecret("stremio_session"))
+    }
+
 }

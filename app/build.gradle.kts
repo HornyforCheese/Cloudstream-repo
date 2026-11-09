@@ -9,8 +9,8 @@ android {
         applicationId = "com.mutinymedia.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-native"
+        versionCode = 2
+        versionName = "0.2.0-debug"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes { release { isMinifyEnabled = false } }

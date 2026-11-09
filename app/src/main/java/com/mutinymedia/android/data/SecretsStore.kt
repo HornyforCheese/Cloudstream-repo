@@ -27,16 +27,19 @@ class SecretsStore(context: Context) {
             generateKey()
         }
     }
-    fun saveOpenRouter(token: String) {
-        if (token.isBlank()) { prefs.edit().remove("openrouter").apply(); return }
+    fun saveOpenRouter(token: String) = saveSecret("openrouter", token)
+    fun readOpenRouter(): String? = readSecret("openrouter")
+
+    fun saveSecret(name: String, token: String) {
+        if (token.isBlank()) { check(prefs.edit().remove(name).commit()) { "Unable to clear saved credentials" }; return }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val encrypted = cipher.doFinal(token.trim().toByteArray(Charsets.UTF_8))
         val stored = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
-        prefs.edit().putString("openrouter", stored).apply()
+        check(prefs.edit().putString(name, stored).commit()) { "Unable to save encrypted credentials" }
     }
-    fun readOpenRouter(): String? = runCatching {
-        val bytes = Base64.decode(prefs.getString("openrouter", null) ?: return null, Base64.NO_WRAP)
+    fun readSecret(name: String): String? = runCatching {
+        val bytes = Base64.decode(prefs.getString(name, null) ?: return null, Base64.NO_WRAP)
         if (bytes.size < 13) return null
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))

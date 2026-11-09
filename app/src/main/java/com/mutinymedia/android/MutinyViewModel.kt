@@ -3,6 +3,8 @@ package com.mutinymedia.android
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mutinymedia.android.data.AccountRepository
+import com.mutinymedia.android.data.AccountImport
 import com.mutinymedia.android.data.AndroidServices
 import com.mutinymedia.android.data.CloudStreamRegistry
 import com.mutinymedia.android.data.OpenRouterClient
@@ -30,6 +32,7 @@ import kotlinx.coroutines.sync.withPermit
 class MutinyViewModel(application: Application) : AndroidViewModel(application) {
     val store = SettingsStore(application)
     val secrets = SecretsStore(application)
+    val accounts = AccountRepository(secrets)
     val android = AndroidServices(application)
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
@@ -74,8 +77,30 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                 if (urls.size > result.size) message.value = "Some saved Stremio addons are unreachable"
             }
         }
+        viewModelScope.launch { accounts.restoreStremio() }
+        viewModelScope.launch { accounts.restoreNuvio() }
         refreshGames()
     }
+    private suspend fun importAccount(data: AccountImport, label: String) {
+        store.importAccountData(data.addons, data.items)
+        message.value = data.warning ?: "$label imported: ${data.addons.size} addons and ${data.items.size} saved titles"
+    }
+    fun loginStremio(email: String, password: String) = runJob {
+        accounts.loginStremio(email,password)
+        importAccount(accounts.pullStremio(),"Stremio")
+    }
+    fun connectStremioKey(key: String) = runJob { accounts.importStremioKey(key);importAccount(accounts.pullStremio(),"Stremio") }
+    fun syncStremio() = runJob { importAccount(accounts.pullStremio(),"Stremio") }
+    fun verifyStremio() = runJob { accounts.restoreStremio() }
+    fun logoutStremio() = runJob { val revoked=accounts.logoutStremio();message.value=if(revoked) "Signed out of Stremio; local titles and addons retained" else "Stremio sign-in cleared locally; remote revocation could not be confirmed" }
+    fun loginNuvio(server: String,email: String,password: String) = runJob {
+        accounts.loginNuvio(server,email,password)
+        message.value="Signed in to Nuvio. Select a profile and import its addons/watchlist."
+    }
+    fun selectNuvioProfile(index: Int,pin: String) = runJob { accounts.selectNuvioProfile(index,pin);message.value="Nuvio profile selected" }
+    fun syncNuvio() = runJob { importAccount(accounts.pullNuvio(),"Nuvio") }
+    fun verifyNuvio() = runJob { accounts.restoreNuvio() }
+    fun logoutNuvio() = runJob { val revoked=accounts.logoutNuvio();message.value=if(revoked) "Signed out of Nuvio; local titles and addons retained" else "Nuvio sign-in cleared locally; remote revocation could not be confirmed" }
     fun saveToWatchlist(item: MediaItem) = runJob { store.addToWatchlist(item); message.value = "Saved to local watchlist" }
     fun removeFromWatchlist(item: MediaItem) = runJob { store.removeFromWatchlist(item); message.value = "Removed from watchlist" }
     fun report(text: String?) { message.value = text }

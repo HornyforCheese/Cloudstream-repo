@@ -60,6 +60,14 @@ class SettingsStore(private val context: Context) {
             p[K.watchlist] = encodeWatchlist((current.filterNot { it.id == item.id && it.type == item.type } + item).takeLast(500))
         }
     }
+    suspend fun importAccountData(addonUrls: List<String>, items: List<MediaItem>) {
+        context.mutinyDataStore.edit { p ->
+            p[K.addons] = encodeStringList(parseStringList(p[K.addons]) + addonUrls)
+            val existing = decodeWatchlist(p[K.watchlist])
+            val merged = (existing + items).distinctBy { it.type to it.id }.take(500)
+            p[K.watchlist] = encodeWatchlist(merged)
+        }
+    }
     suspend fun removeFromWatchlist(item: MediaItem) {
         context.mutinyDataStore.edit { p ->
             p[K.watchlist] = encodeWatchlist(decodeWatchlist(p[K.watchlist]).filterNot { it.id == item.id && it.type == item.type })

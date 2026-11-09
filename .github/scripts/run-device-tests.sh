@@ -6,5 +6,5 @@ adb logcat -c
 runtime_test_exit=$?
 adb logcat -d > device-logcat.txt
 mkdir -p runtime-screenshots
-adb pull /sdcard/Android/data/com.mutinymedia.android/files/Pictures/. runtime-screenshots/ || true
+adb pull /sdcard/Pictures/MutinyRuntime/. runtime-screenshots/ || true
 exit "$runtime_test_exit"

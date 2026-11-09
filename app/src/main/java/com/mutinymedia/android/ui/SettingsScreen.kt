@@ -50,11 +50,9 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
     var addonUrl by remember { mutableStateOf("") }
     var repoUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
-    PanelTitle("Streaming providers", "Nuvio · CloudStream · Stremio. Actual capabilities and connection state, no dummy test buttons.")
-    MutinyPanel("Nuvio • account integration") {
-        Text("Android Nuvio account authentication and cloud watchlist sync are not wired yet.", style = MaterialTheme.typography.bodyMedium)
-        Text("Status: not implemented. A separate, authenticated Nuvio adapter is required; this screen will not pretend a connection exists.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
-    }
+    PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
+    StremioAccountCard(vm)
+    NuvioAccountCard(vm)
     MutinyPanel("CloudStream • repositories") {
         Text("Add a public HTTPS repo.json URL to verify and save its metadata. Running .cs3 extension binaries is not yet supported.")
         OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
@@ -68,7 +66,7 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
         }
     }
     MutinyPanel("Stremio • addon protocol") {
-        Text("Working HTTPS manifest, catalog, and stream lookup. Stremio account login/sync remains separate work.")
+        Text("HTTPS manifests, catalogs and direct streams. Add providers manually here or import them from your signed-in account.")
         OutlinedTextField(value = addonUrl, onValueChange = { addonUrl = it },
             label = { Text("Addon URL or manifest.json") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.addAddon(addonUrl); addonUrl = "" }, enabled = (addonUrl.trim().startsWith("https://", true) || addonUrl.trim().startsWith("stremio://", true)) && !busy) { Text("Connect add-on") }
@@ -201,6 +199,6 @@ private fun AboutSettings() {
     MutinyPanel("Engineering notes") {
         Text("Android min SDK 26 • Android TV/handheld friendly focus targets • responsive layouts")
         Text("Media3 for direct HTTPS MP4/HLS/DASH playback. It cannot run Windows Tauri/Rust modules as-is.")
-        Text("Nuvio account authentication, executable CloudStream extensions, P2P engines, watchlist sync, notification playback service and Android TV certification are planned integration points, not completed features.")
+        Text("Stremio/Nuvio sign-in and account imports are available under Integrations. Executable CloudStream/Nuvio plugins, P2P engines, background playback and Android TV certification require separate integrations.")
     }
 }
