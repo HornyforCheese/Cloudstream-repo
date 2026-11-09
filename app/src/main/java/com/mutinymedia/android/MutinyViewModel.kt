@@ -143,6 +143,19 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
         message.value = "Downloaded ${plugin.name}. Execution requires CloudStream runtime compatibility."
     }
+    /** Direct .cs3 URLs can be pasted without first subscribing to a repository. */
+    fun installCloudStreamUrl(url: String) = runJob {
+        val validated = com.mutinymedia.android.data.Network.validateHttps(url)
+        require(java.net.URI(validated).path.endsWith(".cs3", ignoreCase = true)) {
+            "Paste a direct HTTPS .cs3 extension URL, or add a CloudStream repository URL above"
+        }
+        val name = java.net.URI(validated).path.substringAfterLast('/').removeSuffix(".cs3")
+        val plugin = com.mutinymedia.android.data.CloudStreamPlugin(name, "Direct URL extension", 0, validated, validated)
+        cloudInstaller.install(plugin)
+        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
+        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
+        message.value = "Extension downloaded. CloudStream host compatibility is required before it can search."
+    }
     fun uninstallCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
         cloudInstaller.uninstall(plugin)
         installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
