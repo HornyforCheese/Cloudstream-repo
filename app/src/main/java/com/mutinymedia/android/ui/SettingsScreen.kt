@@ -28,7 +28,7 @@ enum class SettingsTab(val label: String) {
     TMDB("TMDB Enrichment"), MDBLIST("MDBList Ratings"),
     OMDB("OMDb Ratings"), LIVE_TV("Live TV"), DISCORD("Discord"),
     LOW_DATA("Low bandwidth"), ANIME("Anime"), AI("Ask AI"),
-    DOWNLOADS("Downloads"), ABOUT("About")
+    DOWNLOADS("Downloads"), DEBRID("Debrid Services"), ABOUT("About")
 }
 
 @Composable
@@ -54,7 +54,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
                     SettingsLink("Playback", "Player, subtitles and auto-play") { tab = SettingsTab.PLAYBACK }
                 }
                 MutinyPanel("Connections") {
-                    SettingsLink("Integrations", "Streaming, metadata, Live TV and Discord") { tab = SettingsTab.PROVIDERS }
+                    SettingsLink("Integrations", "Streaming, debrid, metadata, Live TV and Discord") { tab = SettingsTab.PROVIDERS }
                     SettingsLink("Tracking", "Tracking providers and watch progress") { tab = SettingsTab.TRACKING }
                 }
                 MutinyPanel("More") {
@@ -67,6 +67,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
             SettingsTab.PROVIDERS -> {
                 MutinyPanel("Integrations") {
                     SettingsLink("Connected Services", "Stremio and Nuvio accounts") { tab = SettingsTab.ACCOUNT }
+                    SettingsLink("Debrid Services", "Real-Debrid API key and connection") { tab = SettingsTab.DEBRID }
                     SettingsLink("TMDB Enrichment", "Metadata enrichment controls") { tab = SettingsTab.TMDB }
                     SettingsLink("MDBList Ratings", "External ratings providers") { tab = SettingsTab.MDBLIST }
                     SettingsLink("OMDb Ratings", "Personal API key for IMDb episode ratings") { tab = SettingsTab.OMDB }
@@ -84,6 +85,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
             }
             SettingsTab.LOW_DATA -> BandwidthSettings(vm, s)
             SettingsTab.ANIME -> AnimeSettings(vm, s)
+            SettingsTab.DEBRID -> DebridSettings(vm)
             SettingsTab.AI -> AiSettings(vm, s)
             SettingsTab.DOWNLOADS -> DirectDownloadSettings(vm)
             SettingsTab.ABOUT -> AboutSettings()
@@ -262,5 +264,25 @@ private fun AboutSettings() {
         Text("Android min SDK 26 • Android TV/handheld friendly focus targets • responsive layouts")
         Text("Media3 for direct HTTPS MP4/HLS/DASH playback. It cannot run Windows Tauri/Rust modules as-is.")
         Text("Stremio/Nuvio sign-in and account imports are available under Integrations. Executable CloudStream/Nuvio plugins, P2P engines, background playback and Android TV certification require separate integrations.")
+    }
+}
+
+@Composable
+private fun DebridSettings(vm: MutinyViewModel) {
+    var key by remember { mutableStateOf("") }
+    val account by vm.debridAccount.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val saved = remember(account, busy) { vm.secrets.readSecret("debrid_real_debrid") != null }
+    MutinyPanel("Real-Debrid") {
+        Text("Resolve supported HTTPS hoster links through your own Real-Debrid account. Torrent magnets and cached torrent conversion are not supported yet.")
+        Text(if (account != null) "Connected: $account" else if (saved) "API key saved (not verified in this session)" else "No API key saved", color = MutedInk)
+        OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Real-Debrid API token") },
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Button(onClick = { vm.saveRealDebridKey(key); key = "" }, enabled = key.isNotBlank() && !busy) { Text("Verify and save API key") }
+        if (saved) {
+            OutlinedButton(onClick = { vm.verifyRealDebrid() }, enabled = !busy) { Text("Check connection") }
+            TextButton(onClick = { vm.saveRealDebridKey("") }, enabled = !busy) { Text("Remove saved key") }
+        }
+        Text("Credentials are encrypted locally with Android Keystore and are never stored in the source repository.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
     }
 }
