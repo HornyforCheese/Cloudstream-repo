@@ -38,6 +38,18 @@ class StremioClientTest {
         val episodes = client.episodes(client.inspectAddon("https://example.org"), MediaItem("tt123", "series", "Show"))
         assertEquals(listOf("tt123:1:2", "tt123:2:1"), episodes.map { it.id })
     }
+    @Test fun searchesCatalogBeyondFifthManifestEntry() = runBlocking {
+        val catalogs = (1..8).joinToString(",") { i ->
+            """{"type":"movie","id":"catalog$i","extra":[{"name":"search"}]}"""
+        }
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json"))
+                """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[$catalogs]}"""
+            else """{"metas":[{"id":"tt${url.substringAfter("catalog").substringBefore("/")}","name":"Movie"}]}""")
+        }
+        val addon = client.inspectAddon("https://example.org")
+        assertEquals(8, client.catalog(addon, "Movie").size)
+    }
     @Test fun rejectsNonManifestJson() = runBlocking {
         val client = StremioClient { _, _ -> JSONObject("{}") }
         assertTrue(runCatching { client.inspectAddon("https://example.org") }.isFailure)
