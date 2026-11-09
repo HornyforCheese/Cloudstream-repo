@@ -36,6 +36,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val android = AndroidServices(application)
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
+    val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
     private val openrouter = OpenRouterClient()
     private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
     val debridAccount = MutableStateFlow<String?>(null)
@@ -132,7 +133,20 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         store.addRepository(url.trim())
         message.value = "Saved CloudStream repository: $label (discovery only)"
     }
-    fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url) }
+    fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url); cloudStreamPlugins.value = cloudStreamPlugins.value.filterNot { it.repository == url } }
+    fun discoverCloudStreamPlugins() = runJob {
+        val repos = settings.value.extensionRepositories
+        require(repos.isNotEmpty()) { "Add a CloudStream repository first" }
+        val discovered = mutableListOf<com.mutinymedia.android.data.CloudStreamPlugin>()
+        val failures = mutableListOf<String>()
+        repos.forEach { repo ->
+            try { discovered += cloudstream.discover(repo) }
+            catch (e: Exception) { failures += "$repo: ${e.message}" }
+        }
+        cloudStreamPlugins.value = discovered.distinctBy { it.downloadUrl }
+        message.value = "Discovered ${cloudStreamPlugins.value.size} CloudStream plugins" +
+            if (failures.isNotEmpty()) " (${failures.size} repositories failed)" else ""
+    }
     fun searchCatalog(query: String) = runJob {
         val term = query.trim()
         if (term.isBlank()) {
