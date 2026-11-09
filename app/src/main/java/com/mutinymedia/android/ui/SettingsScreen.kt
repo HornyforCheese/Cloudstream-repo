@@ -21,38 +21,100 @@ import com.mutinymedia.android.domain.UserSettings
 import kotlin.math.roundToInt
 
 enum class SettingsTab(val label: String) {
-    PROVIDERS("Integrations"), LOW_DATA("Low bandwidth"), ANIME("Anime"), AI("Ask AI"), DOWNLOADS("Downloads"), ABOUT("About")
+    HOME("Settings"), ACCOUNT("Account"), WATCH_PARTY("Watch party"),
+    APPEARANCE("Appearance"), LAYOUT("Layout"),
+    CONTENT("Content & Discovery"), PLAYBACK("Playback"),
+    PROVIDERS("Integrations"), TRACKING("Tracking"),
+    TMDB("TMDB Enrichment"), MDBLIST("MDBList Ratings"),
+    OMDB("OMDb Ratings"), LIVE_TV("Live TV"), DISCORD("Discord"),
+    LOW_DATA("Low bandwidth"), ANIME("Anime"), AI("Ask AI"),
+    DOWNLOADS("Downloads"), ABOUT("About")
 }
 
 @Composable
 fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
-    var tab by rememberSaveable { mutableStateOf(SettingsTab.PROVIDERS) }
+    var tab by rememberSaveable { mutableStateOf(SettingsTab.HOME) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PanelTitle("Settings", "Organised into six categories instead of an endless list.")
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingsTab.entries.forEach { item ->
-                FilterChip(selected = tab == item, onClick = { tab = item }, label = { Text(item.label) })
-            }
+        if (tab != SettingsTab.HOME) {
+            TextButton(onClick = { tab = if (tab in listOf(SettingsTab.TMDB, SettingsTab.MDBLIST, SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD)) SettingsTab.PROVIDERS else SettingsTab.HOME }) { Text("← Back") }
         }
+        PanelTitle(tab.label, if (tab == SettingsTab.HOME) "Manage your Mutiny Media preferences and connected services." else "Mutiny Media Android")
         when (tab) {
-            SettingsTab.PROVIDERS -> IntegrationsSettings(vm, s, addons)
+            SettingsTab.HOME -> {
+                MutinyPanel("Account & social") {
+                    SettingsLink("Account", "Stremio and Nuvio sign-in and sync status") { tab = SettingsTab.ACCOUNT }
+                    SettingsLink("Watch party", "Join friends with a party code") { tab = SettingsTab.WATCH_PARTY }
+                }
+                MutinyPanel("Personalisation") {
+                    SettingsLink("Appearance", "Themes, app icon and language") { tab = SettingsTab.APPEARANCE }
+                    SettingsLink("Layout", "Home, cards, details, streams and navigation") { tab = SettingsTab.LAYOUT }
+                }
+                MutinyPanel("Content") {
+                    SettingsLink("Content & Discovery", "Manage addons and discovery sources") { tab = SettingsTab.CONTENT }
+                    SettingsLink("Playback", "Player, subtitles and auto-play") { tab = SettingsTab.PLAYBACK }
+                }
+                MutinyPanel("Connections") {
+                    SettingsLink("Integrations", "Streaming, metadata, Live TV and Discord") { tab = SettingsTab.PROVIDERS }
+                    SettingsLink("Tracking", "Tracking providers and watch progress") { tab = SettingsTab.TRACKING }
+                }
+                MutinyPanel("More") {
+                    SettingsLink("Ask AI", "OpenRouter recommendations") { tab = SettingsTab.AI }
+                    SettingsLink("Downloads", "Direct file downloads") { tab = SettingsTab.DOWNLOADS }
+                    SettingsLink("About", "App information") { tab = SettingsTab.ABOUT }
+                }
+            }
+            SettingsTab.ACCOUNT -> { StremioAccountCard(vm); NuvioAccountCard(vm) }
+            SettingsTab.PROVIDERS -> {
+                MutinyPanel("Integrations") {
+                    SettingsLink("Connected Services", "Stremio and Nuvio accounts") { tab = SettingsTab.ACCOUNT }
+                    SettingsLink("TMDB Enrichment", "Metadata enrichment controls") { tab = SettingsTab.TMDB }
+                    SettingsLink("MDBList Ratings", "External ratings providers") { tab = SettingsTab.MDBLIST }
+                    SettingsLink("OMDb Ratings", "Personal API key for IMDb episode ratings") { tab = SettingsTab.OMDB }
+                    SettingsLink("Live TV", "M3U playlists for live channels") { tab = SettingsTab.LIVE_TV }
+                    SettingsLink("Discord", "Show what you're watching on Discord") { tab = SettingsTab.DISCORD }
+                }
+                IntegrationsSettings(vm, s, addons, showAccounts = false)
+            }
+            SettingsTab.CONTENT -> IntegrationsSettings(vm, s, addons, showAccounts = false)
+            SettingsTab.PLAYBACK -> {
+                Text("Playback settings currently available on Android:")
+                SettingsLink("Low bandwidth", "Bitrate, resolution and codec preferences") { tab = SettingsTab.LOW_DATA }
+                SettingsLink("Anime audio", "Dub/sub stream filters") { tab = SettingsTab.ANIME }
+                Text("Subtitle selection and auto-play controls are not yet implemented.")
+            }
             SettingsTab.LOW_DATA -> BandwidthSettings(vm, s)
             SettingsTab.ANIME -> AnimeSettings(vm, s)
             SettingsTab.AI -> AiSettings(vm, s)
             SettingsTab.DOWNLOADS -> DirectDownloadSettings(vm)
             SettingsTab.ABOUT -> AboutSettings()
+            SettingsTab.WATCH_PARTY, SettingsTab.APPEARANCE, SettingsTab.LAYOUT,
+            SettingsTab.TRACKING, SettingsTab.TMDB, SettingsTab.MDBLIST,
+            SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD -> {
+                MutinyPanel(tab.label) {
+                    Text("This integration or settings module is not implemented in the Android app yet. It is listed here to match the requested settings structure, but no connection or feature is claimed.")
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
+private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MutedInk)
+        }
+    }
+}
+
+@Composable
+private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>, showAccounts: Boolean = true) {
     var addonUrl by remember { mutableStateOf("") }
     var repoUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
-    StremioAccountCard(vm)
-    NuvioAccountCard(vm)
+    if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
     MutinyPanel("CloudStream • repositories") {
         Text("Add a public HTTPS repo.json URL to verify and save its metadata. Running .cs3 extension binaries is not yet supported.")
         OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
