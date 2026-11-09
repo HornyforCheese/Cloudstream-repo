@@ -15,6 +15,22 @@ class CloudStreamInstaller(private val context: Context) {
     private val directory get() = File(context.filesDir, "cloudstream_extensions").also { it.mkdirs() }
     fun installed(): Set<String> = directory.listFiles()?.filter { it.extension == "cs3" }?.map { it.nameWithoutExtension }?.toSet().orEmpty()
 
+    /** Returns only packages whose manifests and bytecode are still present and readable. */
+    fun registeredPackages(): Map<String, String> = buildMap {
+        directory.listFiles()?.filter { it.extension == "cs3" }?.forEach { file ->
+            runCatching {
+                ZipFile(file).use { zip ->
+                    val manifest = zip.getEntry("manifest.json") ?: return@use
+                    val dex = zip.getEntry("classes.dex") ?: return@use
+                    if (dex.size == 0L) return@use
+                    val data = zip.getInputStream(manifest).bufferedReader().use { JSONObject(it.readText()) }
+                    val className = data.optString("pluginClassName")
+                    if (className.isNotBlank()) put(file.nameWithoutExtension, className)
+                }
+            }
+        }
+    }
+
     suspend fun install(plugin: CloudStreamPlugin): String = withContext(Dispatchers.IO) {
         val url = Network.validateHttps(plugin.downloadUrl)
         val id = MessageDigest.getInstance("SHA-256").digest(url.toByteArray())
