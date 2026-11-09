@@ -116,6 +116,7 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
     var repoUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
+    val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
     if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
     MutinyPanel("CloudStream • repositories") {
@@ -131,7 +132,19 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(plugin.name, fontWeight = FontWeight.SemiBold)
                 Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MutedInk)
-                Text("Discovered only • not installed", style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                val pluginId = remember(plugin.downloadUrl) {
+                    java.security.MessageDigest.getInstance("SHA-256").digest(plugin.downloadUrl.toByteArray())
+                        .joinToString("") { "%02x".format(it) }
+                }
+                Text(if (pluginId in installedPlugins) "Package downloaded • runtime not available" else "Not installed",
+                    style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (pluginId in installedPlugins) {
+                        OutlinedButton(onClick = { vm.uninstallCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Remove") }
+                    } else {
+                        Button(onClick = { vm.installCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Download extension") }
+                    }
+                }
             }
         }
         s.extensionRepositories.forEach { url ->
