@@ -36,6 +36,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val android = AndroidServices(application)
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
+    private val cloudInstaller = com.mutinymedia.android.data.CloudStreamInstaller(application)
+    val installedCloudPlugins = MutableStateFlow(cloudInstaller.installed())
     val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
     private val openrouter = OpenRouterClient()
     private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
@@ -132,6 +134,16 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         val label = cloudstream.inspectRepository(url)
         store.addRepository(url.trim())
         message.value = "Saved CloudStream repository: $label (discovery only)"
+    }
+    fun installCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
+        cloudInstaller.install(plugin)
+        installedCloudPlugins.value = cloudInstaller.installed()
+        message.value = "Downloaded ${plugin.name}. Execution requires CloudStream runtime compatibility."
+    }
+    fun uninstallCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
+        cloudInstaller.uninstall(plugin)
+        installedCloudPlugins.value = cloudInstaller.installed()
+        message.value = "Removed ${plugin.name}"
     }
     fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url); cloudStreamPlugins.value = cloudStreamPlugins.value.filterNot { it.repository == url } }
     fun discoverCloudStreamPlugins() = runJob {
