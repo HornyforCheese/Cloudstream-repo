@@ -103,7 +103,7 @@ class RuntimeSmokeTest {
         rule.onNodeWithText("Save to watchlist").performScrollTo().performClick()
         rule.waitUntil(60_000) { vm.watchlist.value.any { it.id == item.id } }
         nav("Home")
-        rule.onNodeWithText("My local library").performScrollTo().performClick()
+        rule.onNodeWithText("Library").performClick()
         rule.onNodeWithText(item.title).assertExists()
         rule.onNodeWithText("Find streams").performScrollTo().performClick()
         rule.onNodeWithText("Discover & play").assertExists()
@@ -127,6 +127,7 @@ class RuntimeSmokeTest {
             val raw = target.getSharedPreferences("mutiny_secure", Context.MODE_PRIVATE).getString("openrouter", "")!!
             assertFalse(raw.contains("runtime-fixture-not-a-real-key"))
             nav("Settings")
+            rule.onNodeWithText("Playback").performClick()
             rule.onNodeWithText("Low bandwidth").performClick()
             val initial = originalLowBandwidth
             rule.onAllNodes(isToggleable()).onFirst().performScrollTo().performClick()
@@ -193,7 +194,7 @@ class RuntimeSmokeTest {
         rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         rule.activityRule.scenario.onActivity { assertFalse(player.playWhenReady) }
         rule.onNodeWithText("Close").performClick()
-        rule.onNodeWithText("All aboard, mateys.").assertExists()
+        rule.onNodeWithText("Mutiny Media").assertExists()
         video.delete()
     }
 
@@ -248,6 +249,7 @@ class RuntimeSmokeTest {
         val vm=model()
         org.junit.Assume.assumeTrue(!vm.accounts.stremioStatus.value.saved && !vm.accounts.stremioStatus.value.connected)
         nav("Settings")
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Stremio email").performScrollTo().performTextInput("mutiny-runtime-fixture@example.invalid")
         rule.onNodeWithText("Stremio password").performScrollTo().performTextInput("not-a-real-password")
         rule.onNodeWithText("Sign in to Stremio").performScrollTo().performClick()
@@ -260,6 +262,7 @@ class RuntimeSmokeTest {
         val vm=model()
         org.junit.Assume.assumeTrue(!vm.accounts.nuvioStatus.value.saved && !vm.accounts.nuvioStatus.value.connected)
         nav("Settings")
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Nuvio email").performScrollTo().performTextInput("mutiny-runtime-fixture@example.invalid")
         rule.onNodeWithText("Nuvio password").performScrollTo().performTextInput("not-a-real-password")
         rule.onNodeWithText("Sign in to Nuvio").performScrollTo().performClick()
@@ -272,6 +275,7 @@ class RuntimeSmokeTest {
         val vm=model()
         org.junit.Assume.assumeTrue(!vm.accounts.stremioStatus.value.saved && !vm.accounts.stremioStatus.value.connected)
         nav("Settings")
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Use an auth key instead").performScrollTo().performClick()
         rule.onNodeWithText("Stremio auth key").performScrollTo().performTextInput("not-a-real-auth-key")
         rule.onNodeWithText("Connect Stremio auth key").performScrollTo().performClick()
