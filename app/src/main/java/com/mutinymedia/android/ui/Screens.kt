@@ -220,6 +220,11 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                         Button(onClick = { vm.play(option) }, enabled = option.playable, modifier = Modifier.fillMaxWidth()) {
                             Text(if (option.playable) "Play HTTPS stream" else "Torrent / unsupported stream")
                         }
+                        if (!option.url.isNullOrBlank() && option.url.startsWith("https://")) {
+                            OutlinedButton(onClick = { vm.playViaRealDebrid(option) }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Resolve with Real-Debrid")
+                            }
+                        }
                         option.externalUrl?.let { url ->
                             OutlinedButton(onClick = {
                                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
