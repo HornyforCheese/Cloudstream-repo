@@ -57,47 +57,69 @@ fun HomeScreen(
     onLibrary: () -> Unit,
     onSelectTitle: (MediaItem) -> Unit,
 ) {
-    val featured = (watchlist + catalog).distinctBy { it.type to it.id }.filter { !it.poster.isNullOrBlank() }
-    val anime = featured.filter { it.isAnime || it.type == "anime" }
-    val movies = featured.filter { it.type == "movie" }
+    val items = (catalog + watchlist).distinctBy { it.type to it.id }
+    val featured = items.filter { !it.poster.isNullOrBlank() }
+    val anime = items.filter { it.isAnime || it.type == "anime" }
+    val movies = items.filter { it.type == "movie" }
+    val series = items.filter { it.type == "series" }
+    var category by rememberSaveable { mutableStateOf("Discover") }
+    val categories = listOf("Discover", "Movies", "Series", "Anime", "Library")
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-            Text("Aha, mateys!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Mint)
-            Text("Your next adventure awaits", color = MutedInk)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            categories.forEach { name ->
+                FilterChip(selected = category == name, onClick = {
+                    category = name
+                    if (name == "Library") onLibrary()
+                }, label = { Text(name) })
+            }
         }
-        if (featured.isNotEmpty()) {
+        if (category == "Discover" && featured.isNotEmpty()) {
             val hero = featured.first()
-            Box(Modifier.fillMaxWidth().height(225.dp).clickable { onSelectTitle(hero) }) {
-                AsyncImage(model = hero.poster, contentDescription = hero.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .42f)))
-                Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
-                    Text("FEATURED • MUTINY MEDIA", color = Mint, style = MaterialTheme.typography.labelMedium)
-                    Text(hero.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2)
-                    Text("Explore available streams  ›", color = Color.White)
+            Box(Modifier.fillMaxWidth().height(290.dp).clickable { onSelectTitle(hero) }) {
+                AsyncImage(model = hero.poster, contentDescription = hero.title,
+                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f)))
+                Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("FEATURED ON MUTINY MEDIA", color = Mint, style = MaterialTheme.typography.labelMedium)
+                    Text(hero.title, style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold, maxLines = 2)
+                    hero.description?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Button(onClick = { onSelectTitle(hero) }) { Text("Explore streams") }
                 }
             }
+        }
+        if (items.isEmpty()) {
+            MutinyPanel("Welcome aboard", Modifier.padding(horizontal = 16.dp)) {
+                Text("Connect a Stremio catalog or import your library to see movies, series and anime here.")
+                Button(onClick = onBrowse) { Text("Search for titles") }
+                OutlinedButton(onClick = onSettings) { Text("Connect providers") }
+            }
+        }
+        if (category == "Discover") {
+            if (watchlist.isNotEmpty()) PosterShelf("Continue exploring • My Library", watchlist, onSelectTitle, onLibrary)
+            if (catalog.isNotEmpty()) PosterShelf("Discover", catalog, onSelectTitle, onBrowse)
+            if (movies.isNotEmpty()) PosterShelf("Movies", movies, onSelectTitle, onBrowse)
+            if (series.isNotEmpty()) PosterShelf("Series", series, onSelectTitle, onBrowse)
+            if (anime.isNotEmpty()) PosterShelf("Anime", anime, onSelectTitle, onBrowse)
         } else {
-            MutinyPanel("Discover your next adventure", Modifier.padding(horizontal = 16.dp)) {
-                Text("Add a Stremio catalog or import your account to populate your home screen with posters and titles.")
-                Button(onClick = onBrowse) { Text("Discover titles") }
+            val filtered = when (category) {
+                "Movies" -> movies
+                "Series" -> series
+                "Anime" -> anime
+                else -> watchlist
             }
+            if (filtered.isNotEmpty()) PosterShelf(category, filtered, onSelectTitle, onBrowse)
+            else Text("No $category titles loaded yet. Search to discover more.",
+                modifier = Modifier.padding(horizontal = 18.dp), color = MutedInk)
         }
-        if (watchlist.isNotEmpty()) {
-            PosterShelf("From your library", watchlist, onSelectTitle, onLibrary)
-        }
-        if (anime.isNotEmpty()) PosterShelf("Anime voyages", anime, onSelectTitle, onBrowse)
-        if (movies.isNotEmpty()) PosterShelf("Movies to explore", movies, onSelectTitle, onBrowse)
-        if (catalog.isNotEmpty()) PosterShelf("Recently discovered", catalog, onSelectTitle, onBrowse)
-        if (featured.isEmpty()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onLibrary, modifier = Modifier.weight(1f)) { Text("Library") }
-                OutlinedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Integrations") }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBrowse, modifier = Modifier.weight(1f)) { Text("Search") }
             OutlinedButton(onClick = onAI, modifier = Modifier.weight(1f)) { Text("Ask AI") }
         }
