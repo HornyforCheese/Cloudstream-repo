@@ -132,10 +132,21 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url) }
     fun searchCatalog(query: String) = runJob {
-        if (addons.value.isEmpty()) error("Add a Stremio catalog provider in Settings → Integrations first")
-        catalog.value = queryProviders { addon -> stremio.catalog(addon, query.takeIf(String::isNotBlank)) }
-            .distinctBy { it.type to it.id }
-        if (catalog.value.isEmpty()) message.value = "No titles returned. The addon may not support catalog search. Try direct ID lookup."
+        val term = query.trim()
+        if (term.isBlank()) {
+            catalog.value = queryProviders { addon -> stremio.catalog(addon) }
+                .distinctBy { it.type to it.id }
+        } else {
+            // Stream-only addons do not expose catalogs. Use public Cinemeta metadata
+            // for title selection, then resolve streams through installed stream addons.
+            val fromAddons = if (addons.value.isEmpty()) emptyList() else
+                queryProviders { addon -> stremio.catalog(addon, term) }
+            val metadata = providerResult { stremio.catalog(
+                com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term
+            ) }.orEmpty()
+            catalog.value = (fromAddons + metadata).distinctBy { it.type to it.id }
+        }
+        if (catalog.value.isEmpty()) message.value = "No matching titles found. Check the spelling or try another search."
     }
     fun lookup(type: String, id: String, anime: Boolean) = runJob {
         if (id.isBlank()) error("Enter a Stremio content ID, such as tt1254207")
