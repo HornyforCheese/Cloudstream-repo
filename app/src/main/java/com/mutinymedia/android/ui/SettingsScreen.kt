@@ -115,13 +115,25 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
     var addonUrl by remember { mutableStateOf("") }
     var repoUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
     if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
     MutinyPanel("CloudStream • repositories") {
-        Text("Add a public HTTPS repo.json URL to verify and save its metadata. Running .cs3 extension binaries is not yet supported.")
+        Text("Add a CloudStream repository, then discover its available extension packages. Executing .cs3 plugins is not yet supported.")
         OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.addExtensionRepo(repoUrl); repoUrl = "" }, enabled = repoUrl.startsWith("https://") && !busy) { Text("Verify & save repository") }
+        OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
+            Text("Discover available extensions")
+        }
+        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MutedInk)
+        plugins.forEach { plugin ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text(plugin.name, fontWeight = FontWeight.SemiBold)
+                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+                Text("Discovered only • not installed", style = MaterialTheme.typography.labelSmall, color = MutedInk)
+            }
+        }
         s.extensionRepositories.forEach { url ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(url, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
