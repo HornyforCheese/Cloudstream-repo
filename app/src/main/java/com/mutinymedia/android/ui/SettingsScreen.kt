@@ -114,6 +114,7 @@ private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
 private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>, showAccounts: Boolean = true) {
     var addonUrl by remember { mutableStateOf("") }
     var repoUrl by remember { mutableStateOf("") }
+    var directExtensionUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
     val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
@@ -125,6 +126,14 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
         OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.addExtensionRepo(repoUrl); repoUrl = "" }, enabled = repoUrl.startsWith("https://") && !busy) { Text("Verify & save repository") }
+        OutlinedTextField(value = directExtensionUrl, onValueChange = { directExtensionUrl = it },
+            label = { Text("Or paste a direct HTTPS .cs3 extension URL") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Button(onClick = { vm.installCloudStreamUrl(directExtensionUrl); directExtensionUrl = "" },
+            enabled = directExtensionUrl.trim().startsWith("https://", true) &&
+                directExtensionUrl.trim().substringBefore('?').endsWith(".cs3", true) && !busy) {
+            Text("Download extension from URL")
+        }
         OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
             Text("Discover available extensions")
         }
