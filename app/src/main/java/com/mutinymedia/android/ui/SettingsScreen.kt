@@ -117,6 +117,7 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
     val busy by vm.busy.collectAsStateWithLifecycle()
     val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
     val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
+    val hostStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
     if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
     MutinyPanel("CloudStream • repositories") {
@@ -128,6 +129,13 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
             Text("Discover available extensions")
         }
         if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MutedInk)
+        OutlinedButton(onClick = { vm.inspectCloudStreamHost() }, enabled = installedPlugins.isNotEmpty() && !busy) {
+            Text("Check installed extension compatibility")
+        }
+        hostStatuses.forEach { status ->
+            Text("${status.packageId.take(10)}: ${status.state} • ${status.detail}",
+                style = MaterialTheme.typography.bodySmall, color = MutedInk)
+        }
         plugins.forEach { plugin ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(plugin.name, fontWeight = FontWeight.SemiBold)
