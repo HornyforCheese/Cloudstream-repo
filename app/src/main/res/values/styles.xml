@@ -1,0 +1,1 @@
+<resources><style name="Theme.MutinyMedia" parent="android:style/Theme.Material.NoActionBar"><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">#100923</item><item name="android:statusBarColor">#100923</item><item name="android:windowActionModeOverlay">true</item></style></resources>

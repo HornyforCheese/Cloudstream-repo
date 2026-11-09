@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.data.StremioClientTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-09T00:41:10.151Z" hostname="81258a87bdd0" time="0.249">
+  <properties/>
+  <testcase name="rejectsNonManifestJson" classname="com.mutinymedia.android.data.StremioClientTest" time="0.099"/>
+  <testcase name="episodesSortAndUseProviderVideoIds" classname="com.mutinymedia.android.data.StremioClientTest" time="0.031"/>
+  <testcase name="streamHeadersAndUnsupportedSourcesArePreserved" classname="com.mutinymedia.android.data.StremioClientTest" time="0.09"/>
+  <testcase name="searchesEncodedQueryAndPreservesMediaType" classname="com.mutinymedia.android.data.StremioClientTest" time="0.026"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

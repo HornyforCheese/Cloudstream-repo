@@ -1,0 +1,180 @@
+package com.mutinymedia.android
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.mutinymedia.android.data.AndroidServices
+import com.mutinymedia.android.data.CloudStreamRegistry
+import com.mutinymedia.android.data.OpenRouterClient
+import com.mutinymedia.android.data.SecretsStore
+import com.mutinymedia.android.data.SettingsStore
+import com.mutinymedia.android.data.StremioClient
+import com.mutinymedia.android.domain.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+
+class MutinyViewModel(application: Application) : AndroidViewModel(application) {
+    val store = SettingsStore(application)
+    val secrets = SecretsStore(application)
+    val android = AndroidServices(application)
+    val stremio = StremioClient()
+    private val cloudstream = CloudStreamRegistry()
+    private val openrouter = OpenRouterClient()
+    val settings: StateFlow<UserSettings> = store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings())
+    val addons = MutableStateFlow<List<Addon>>(emptyList())
+    val watchlist: StateFlow<List<MediaItem>> = store.watchlist.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val catalog = MutableStateFlow<List<MediaItem>>(emptyList())
+    val episodes = MutableStateFlow<List<Episode>>(emptyList())
+    val selectedEpisode = MutableStateFlow<String?>(null)
+    val streams = MutableStateFlow<List<StreamOption>>(emptyList())
+    val currentItem = MutableStateFlow<MediaItem?>(null)
+    val activeStream = MutableStateFlow<StreamOption?>(null)
+    val chat = MutableStateFlow<List<ChatLine>>(emptyList())
+    val message = MutableStateFlow<String?>(null)
+    val busy = MutableStateFlow(false)
+    val games = MutableStateFlow<List<InstalledGame>>(emptyList())
+
+    private val operationMutex = Mutex()
+    private val providerSlots = Semaphore(4)
+    private suspend fun <T> queryProviders(block: suspend (Addon) -> List<T>): List<T> = coroutineScope {
+        val providers = addons.value
+        val results = providers.map { addon -> async {
+            providerSlots.withPermit { providerResult { block(addon) } }
+        } }.awaitAll()
+        if (results.isNotEmpty() && results.all { it == null }) error("All connected providers failed. Check your connection and addon configuration.")
+        if (results.any { it == null }) message.value = "Some providers failed; showing available results"
+        results.filterNotNull().flatten()
+    }
+
+    private suspend fun <T> providerResult(block: suspend () -> T): T? =
+        try { block() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+
+    init {
+        viewModelScope.launch {
+            store.settings.map { it.addonUrls }.distinctUntilChanged().collectLatest { urls ->
+                val result = coroutineScope {
+                    urls.map { url -> async { providerSlots.withPermit { providerResult { stremio.inspectAddon(url) } } } }
+                        .awaitAll().filterNotNull()
+                }
+                addons.value = result
+                if (urls.size > result.size) message.value = "Some saved Stremio addons are unreachable"
+            }
+        }
+        refreshGames()
+    }
+    fun saveToWatchlist(item: MediaItem) = runJob { store.addToWatchlist(item); message.value = "Saved to local watchlist" }
+    fun removeFromWatchlist(item: MediaItem) = runJob { store.removeFromWatchlist(item); message.value = "Removed from watchlist" }
+    fun report(text: String?) { message.value = text }
+    fun runJob(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            operationMutex.withLock {
+                busy.value = true
+                try { block() } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { message.value = e.message ?: "Operation failed" }
+                finally { busy.value = false }
+            }
+        }
+    }
+    fun addAddon(url: String) = runJob {
+        val addon = stremio.inspectAddon(url)
+        store.addAddon(addon.baseUrl)
+        message.value = "Added ${addon.title}"
+    }
+    fun refreshAddons() = runJob {
+        val result = settings.value.addonUrls.mapNotNull { url -> providerResult { stremio.inspectAddon(url) } }
+        addons.value = result
+        message.value = "Verified ${result.size} of ${settings.value.addonUrls.size} saved addons"
+    }
+    fun removeAddon(url: String) = runJob { store.removeAddon(url); message.value = "Addon removed" }
+    fun addExtensionRepo(url: String) = runJob {
+        val label = cloudstream.inspectRepository(url)
+        store.addRepository(url.trim())
+        message.value = "Saved CloudStream repository: $label (discovery only)"
+    }
+    fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url) }
+    fun searchCatalog(query: String) = runJob {
+        if (addons.value.isEmpty()) error("Add a Stremio catalog provider in Settings → Integrations first")
+        catalog.value = queryProviders { addon -> stremio.catalog(addon, query.takeIf(String::isNotBlank)) }
+            .distinctBy { it.type to it.id }
+        if (catalog.value.isEmpty()) message.value = "No titles returned. The addon may not support catalog search. Try direct ID lookup."
+    }
+    fun lookup(type: String, id: String, anime: Boolean) = runJob {
+        if (id.isBlank()) error("Enter a Stremio content ID, such as tt1254207")
+        val media = MediaItem(id.trim(), type, id.trim(), isAnime = anime)
+        requestStreams(media)
+    }
+    fun loadStreams(media: MediaItem) = runJob { requestStreams(media) }
+    private suspend fun requestStreams(media: MediaItem) {
+        streams.value = emptyList()
+        episodes.value = emptyList()
+        selectedEpisode.value = null
+        currentItem.value = media
+        if (addons.value.isEmpty()) error("Install a Stremio addon first")
+        if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
+            episodes.value = addons.value.flatMap { addon -> providerResult { stremio.episodes(addon, media) }.orEmpty() }
+                .distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
+            if (episodes.value.isNotEmpty()) {
+                message.value = "Select an episode to find streams"
+                return
+            }
+        }
+        fetchStreams(media)
+    }
+    fun selectEpisode(episode: Episode) = runJob {
+        val media = currentItem.value ?: return@runJob
+        selectedEpisode.value = episode.id
+        streams.value = emptyList()
+        fetchStreams(media.copy(id = episode.id))
+    }
+    private suspend fun fetchStreams(media: MediaItem) {
+        streams.value = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
+            .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
+        if (streams.value.isEmpty()) message.value = "No streams returned by connected providers"
+    }
+    fun play(stream: StreamOption) {
+        if (!stream.playable) { message.value = "This source requires a torrent/debrid engine that is not integrated yet"; return }
+        activeStream.value = stream
+    }
+    fun playTestVideo() {
+        currentItem.value = MediaItem("demo", "movie", "Big Buck Bunny • Creative Commons test video")
+        activeStream.value = StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample")
+    }
+    fun refreshGames() {
+        viewModelScope.launch {
+            try { games.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { android.installedGames() } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { message.value = "Unable to query installed games" }
+        }
+    }
+    fun download(url: String, filename: String) = runJob {
+        val id = android.downloadFile(url, filename)
+        message.value = "Android DownloadManager queued job #$id"
+    }
+    fun saveOpenRouterKey(value: String) {
+        try { secrets.saveOpenRouter(value); message.value = if (value.isBlank()) "OpenRouter key cleared" else "OpenRouter key encrypted and saved" }
+        catch (e: Exception) { message.value = "Unable to store key: ${e.message}" }
+    }
+    fun sendMessage(text: String) = runJob {
+        if (text.isBlank()) return@runJob
+        val key = secrets.readOpenRouter().orEmpty()
+        require(key.isNotBlank()) { "Connect OpenRouter in Settings first" }
+        val updated = chat.value.takeLast(100) + ChatLine(true, text.trim())
+        chat.value = updated
+        val response = openrouter.complete(key, settings.value.openRouterModel, updated)
+        chat.value = updated + ChatLine(false, response)
+    }
+}

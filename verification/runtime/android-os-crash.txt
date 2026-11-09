@@ -1,0 +1,4 @@
+--------- beginning of crash
+11-09 00:34:33.347  1830  1830 E AndroidRuntime: FATAL EXCEPTION: main
+11-09 00:34:33.347  1830  1830 E AndroidRuntime: Process: com.android.bluetooth, PID: 1830
+11-09 00:34:33.347  1830  1830 E AndroidRuntime: DeadSystemException: The system died; earlier logs will point to the root cause

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.domain.StreamFiltersTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-11-09T00:41:10.449Z" hostname="81258a87bdd0" time="0.055">
+  <properties/>
+  <testcase name="bandwidthPrioritisesLowResolution" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.027"/>
+  <testcase name="nonAnimeUnfiltered" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.0"/>
+  <testcase name="dubOnlyOnAnime" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.002"/>
+  <testcase name="bandwidthDoesNotReorderWhenDisabled" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.0"/>
+  <testcase name="playbackRejectsMalformedAndInsecureUrls" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.001"/>
+  <testcase name="strictModesExcludeUnknownSources" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.0"/>
+  <testcase name="subOnlyOnAnime" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.007"/>
+  <testcase name="bitratesAddCorrectly" classname="com.mutinymedia.android.domain.StreamFiltersTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

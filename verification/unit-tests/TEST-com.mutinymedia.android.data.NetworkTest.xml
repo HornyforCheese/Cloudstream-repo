@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.data.NetworkTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-09T00:41:10.003Z" hostname="81258a87bdd0" time="0.143">
+  <properties/>
+  <testcase name="rejectsInvalidAndInsecureUrls" classname="com.mutinymedia.android.data.NetworkTest" time="0.075"/>
+  <testcase name="responseLimitUsesBytesAndClosesStream" classname="com.mutinymedia.android.data.NetworkTest" time="0.003"/>
+  <testcase name="normalizesAddonManifestAndStremioLinks" classname="com.mutinymedia.android.data.NetworkTest" time="0.053"/>
+  <testcase name="acceptsHttpsAndTrimsWhitespace" classname="com.mutinymedia.android.data.NetworkTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
