@@ -37,6 +37,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
     private val cloudInstaller = com.mutinymedia.android.data.CloudStreamInstaller(application)
+    private val cloudHost = com.mutinymedia.android.data.CloudStreamHost(application)
+    val cloudHostStatuses = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamHost.ProviderStatus>>(emptyList())
     val installedCloudPlugins = MutableStateFlow(cloudInstaller.registeredPackages().keys)
     val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
     private val openrouter = OpenRouterClient()
@@ -138,12 +140,23 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     fun installCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
         cloudInstaller.install(plugin)
         installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
+        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
         message.value = "Downloaded ${plugin.name}. Execution requires CloudStream runtime compatibility."
     }
     fun uninstallCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
         cloudInstaller.uninstall(plugin)
-        installedCloudPlugins.value = cloudInstaller.installed()
+        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
+        cloudHost.unloadAll()
+        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
         message.value = "Removed ${plugin.name}"
+    }
+    fun inspectCloudStreamHost() = runJob {
+        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
+        message.value = "Checked ${cloudHostStatuses.value.size} installed CloudStream packages for host compatibility"
+    }
+    override fun onCleared() {
+        cloudHost.unloadAll()
+        super.onCleared()
     }
     fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url); cloudStreamPlugins.value = cloudStreamPlugins.value.filterNot { it.repository == url } }
     fun discoverCloudStreamPlugins() = runJob {
