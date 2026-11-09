@@ -68,6 +68,18 @@ class StremioClient(
         }
         return all.distinctBy { it.type to it.id }.take(300)
     }
+    /** Fetches full title metadata from an addon without discarding existing poster/description. */
+    suspend fun metadata(addon: Addon, media: MediaItem): MediaItem {
+        if (!addon.supportsMeta) return media
+        val result = fetch("${addon.baseUrl}/meta/${encode(media.type)}/${encode(media.id)}.json")
+        val meta = result.optJSONObject("meta") ?: return media
+        val name = meta.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: media.title
+        val poster = meta.optString("poster").takeIf { it.startsWith("https://", true) } ?: media.poster
+        val description = meta.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: media.description
+        return media.copy(title = name, poster = poster, description = description,
+            isAnime = media.isAnime || meta.optString("type") == "anime")
+    }
+
     suspend fun episodes(addon: Addon, media: MediaItem): List<Episode> {
         if (!addon.supportsMeta) return emptyList()
         val data = fetch("${addon.baseUrl}/meta/${encode(media.type)}/${encode(media.id)}.json")
