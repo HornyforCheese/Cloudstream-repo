@@ -48,29 +48,88 @@ fun MutinyPanel(title: String, modifier: Modifier = Modifier, content: @Composab
 }
 
 @Composable
-fun HomeScreen(onBrowse: () -> Unit, onSettings: () -> Unit, onAI: () -> Unit, onLibrary: () -> Unit, onTestVideo: () -> Unit) {
-    val context = LocalContext.current
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Image(painterResource(R.drawable.mutiny_ship), contentDescription = "Mutiny Media pirate ship logo",
-            modifier = Modifier.size(180.dp), contentScale = ContentScale.Fit)
-        Text("All aboard, mateys.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        Text("A native Android voyage for films, TV, anime, games, and streaming sources.", color = MutedInk)
-        MutinyPanel("Start watching") {
-            Button(onClick = onBrowse, modifier = Modifier.fillMaxWidth()) { Text("Browse Stremio catalogs & streams") }
-            OutlinedButton(onClick = onTestVideo, modifier = Modifier.fillMaxWidth()) { Text("Play legal demonstration video") }
-            OutlinedButton(onClick = onLibrary, modifier = Modifier.fillMaxWidth()) { Text("My local library") }
+fun HomeScreen(
+    watchlist: List<MediaItem>,
+    catalog: List<MediaItem>,
+    onBrowse: () -> Unit,
+    onSettings: () -> Unit,
+    onAI: () -> Unit,
+    onLibrary: () -> Unit,
+    onSelectTitle: (MediaItem) -> Unit,
+) {
+    val featured = (watchlist + catalog).distinctBy { it.type to it.id }.filter { !it.poster.isNullOrBlank() }
+    val anime = featured.filter { it.isAnime || it.type == "anime" }
+    val movies = featured.filter { it.type == "movie" }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+            Text("Aha, mateys!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Mint)
+            Text("Your next adventure awaits", color = MutedInk)
         }
-        MutinyPanel("Quick actions") {
-            Text("Raised buttons stay readable in dark mode and on smaller screens.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ElevatedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
-                ElevatedButton(onClick = onAI, modifier = Modifier.weight(1f)) { Text("Ask AI") }
+        if (featured.isNotEmpty()) {
+            val hero = featured.first()
+            Box(Modifier.fillMaxWidth().height(225.dp).clickable { onSelectTitle(hero) }) {
+                AsyncImage(model = hero.poster, contentDescription = hero.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .42f)))
+                Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+                    Text("FEATURED • MUTINY MEDIA", color = Mint, style = MaterialTheme.typography.labelMedium)
+                    Text(hero.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                    Text("Explore available streams  ›", color = Color.White)
+                }
+            }
+        } else {
+            MutinyPanel("Discover your next adventure", Modifier.padding(horizontal = 16.dp)) {
+                Text("Add a Stremio catalog or import your account to populate your home screen with posters and titles.")
+                Button(onClick = onBrowse) { Text("Discover titles") }
             }
         }
-        MutinyPanel("Development status") {
-            Text("Native video playback, Stremio addon lookup, low-bandwidth controls, provider setup, direct downloads and installed-game launching are present in this starter.")
-            Text("Account imports merge your Stremio/Nuvio addons and saved titles locally. Executable provider plugins, torrent engines and Windows-specific modules require separate integrations.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+        if (watchlist.isNotEmpty()) {
+            PosterShelf("From your library", watchlist, onSelectTitle, onLibrary)
+        }
+        if (anime.isNotEmpty()) PosterShelf("Anime voyages", anime, onSelectTitle, onBrowse)
+        if (movies.isNotEmpty()) PosterShelf("Movies to explore", movies, onSelectTitle, onBrowse)
+        if (catalog.isNotEmpty()) PosterShelf("Recently discovered", catalog, onSelectTitle, onBrowse)
+        if (featured.isEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onLibrary, modifier = Modifier.weight(1f)) { Text("Library") }
+                OutlinedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Integrations") }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onBrowse, modifier = Modifier.weight(1f)) { Text("Search") }
+            OutlinedButton(onClick = onAI, modifier = Modifier.weight(1f)) { Text("Ask AI") }
+        }
+    }
+}
+
+@Composable
+private fun PosterShelf(title: String, items: List<MediaItem>, onSelectTitle: (MediaItem) -> Unit, onMore: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onMore) { Text("See all ›", color = Mint) }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items.distinctBy { it.type to it.id }.take(20).forEach { item ->
+                Column(Modifier.width(132.dp).clickable { onSelectTitle(item) }) {
+                    if (!item.poster.isNullOrBlank()) {
+                        Card(shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) {
+                            AsyncImage(model = item.poster, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(194.dp))
+                        }
+                    } else {
+                        Card(Modifier.fillMaxWidth().height(194.dp)) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("☠", style = MaterialTheme.typography.headlineLarge, color = Mint)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                    Text(item.type.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                }
+            }
         }
     }
 }
