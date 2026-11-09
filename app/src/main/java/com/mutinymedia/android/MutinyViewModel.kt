@@ -187,6 +187,14 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         episodes.value = emptyList()
         selectedEpisode.value = null
         currentItem.value = media
+        val metadataSources = addons.value.filter { it.supportsMeta } +
+            Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
+        // Prefer a configured metadata provider, then use Cinemeta as a public fallback.
+        for (source in metadataSources) {
+            val enriched = providerResult { stremio.metadata(source, currentItem.value!!) } ?: continue
+            currentItem.value = enriched
+            if (enriched.poster != null && enriched.description != null && enriched.title != media.id) break
+        }
         if (addons.value.isEmpty()) error("Install a Stremio addon first")
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
             val metadataSources = addons.value.filter { it.supportsMeta } +
