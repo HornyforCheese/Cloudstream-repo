@@ -34,6 +34,8 @@ class MainActivity : ComponentActivity() {
 fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val addons by vm.addons.collectAsStateWithLifecycle()
+    val watchlist by vm.watchlist.collectAsStateWithLifecycle()
+    val catalog by vm.catalog.collectAsStateWithLifecycle()
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
@@ -100,11 +102,13 @@ fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
                     when {
                         showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; section = Section.BROWSE })
                         section == Section.HOME -> HomeScreen(
+                            watchlist = watchlist,
+                            catalog = catalog,
                             onBrowse = { section = Section.BROWSE },
                             onSettings = { section = Section.SETTINGS },
                             onAI = { section = Section.AI },
                             onLibrary = { showLibrary = true },
-                            onTestVideo = { vm.playTestVideo() },
+                            onSelectTitle = { vm.loadStreams(it); section = Section.BROWSE },
                         )
                         section == Section.BROWSE -> BrowseScreen(vm, settings, addons)
                         section == Section.GAMES -> GamesScreen(vm)
