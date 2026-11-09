@@ -165,13 +165,21 @@ class NuvioAccountAdapter(private val transport: AccountTransport = AccountHttp)
     }
     suspend fun refresh(saved: NuvioSession): NuvioSession = session(saved.server,request("POST","${saved.server.base}/auth/v1/token?grant_type=refresh_token",headers(saved.server),JSONObject().put("refresh_token",saved.refresh)),saved)
     suspend fun verify(saved: NuvioSession): NuvioSession {
-        val active = if (saved.expiresAt <= System.currentTimeMillis()/1000+60) refresh(saved) else saved
-        try {
-            val user=request("GET","${active.server.base}/auth/v1/user",headers(active.server,active.access),null) as? JSONObject
+        var active = if (saved.expiresAt <= System.currentTimeMillis() / 1000 + 60) refresh(saved) else saved
+        suspend fun checkIdentity(session: NuvioSession) {
+            val user = request("GET", "${session.server.base}/auth/v1/user", headers(session.server, session.access), null) as? JSONObject
                 ?: throw AccountException("Nuvio returned invalid user data")
-            check(requiredText(user,"id")==active.userId) { "Nuvio session identity could not be verified" }
+            if (requiredText(user, "id") != saved.userId) {
+                throw AccountException("Nuvio session identity could not be verified", expired = true)
+            }
         }
-        catch (e: AccountException) { if (e.expired && active === saved) return refresh(saved) else throw e }
+        try {
+            checkIdentity(active)
+        } catch (e: AccountException) {
+            if (!e.expired || active !== saved) throw e
+            active = refresh(saved)
+            checkIdentity(active)
+        }
         return active
     }
     private suspend fun rpc(session: NuvioSession, name: String, body: JSONObject) = request("POST","${session.server.base}/rest/v1/rpc/$name",headers(session.server,session.access),body)
