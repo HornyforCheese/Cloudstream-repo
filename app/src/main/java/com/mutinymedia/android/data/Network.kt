@@ -31,7 +31,7 @@ object Network {
         output.toString(Charsets.UTF_8.name())
     }
 
-    suspend fun getJson(url: String, limitBytes: Int = 2_000_000): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun getText(url: String, limitBytes: Int = 2_000_000): String = withContext(Dispatchers.IO) {
         var target = validateHttps(url)
         repeat(6) { attempt ->
             coroutineContext.ensureActive()
@@ -41,7 +41,7 @@ object Network {
                 connection.readTimeout = 16_000
                 connection.instanceFollowRedirects = false
                 connection.setRequestProperty("Accept", "application/json")
-                connection.setRequestProperty("User-Agent", "MutinyMediaAndroid/0.1")
+                connection.setRequestProperty("User-Agent", "MutinyMediaAndroid/0.2")
                 val code = connection.responseCode
                 if (code in listOf(301, 302, 303, 307, 308)) {
                     require(attempt < 5) { "Too many provider redirects" }
@@ -49,10 +49,13 @@ object Network {
                     target = validateHttps(URL(URL(target), location).toString())
                 } else {
                     require(code in 200..299) { "Provider returned HTTP $code" }
-                    return@withContext JSONObject(readLimited(connection.inputStream, limitBytes))
+                    return@withContext readLimited(connection.inputStream, limitBytes)
                 }
             } finally { connection.disconnect() }
         }
         error("Too many provider redirects")
     }
+
+    suspend fun getJson(url: String, limitBytes: Int = 2_000_000): JSONObject =
+        JSONObject(getText(url, limitBytes))
 }
