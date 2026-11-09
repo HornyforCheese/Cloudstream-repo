@@ -189,7 +189,9 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         currentItem.value = media
         if (addons.value.isEmpty()) error("Install a Stremio addon first")
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
-            episodes.value = addons.value.flatMap { addon -> providerResult { stremio.episodes(addon, media) }.orEmpty() }
+            val metadataSources = addons.value.filter { it.supportsMeta } +
+                com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
+            episodes.value = metadataSources.flatMap { addon -> providerResult { stremio.episodes(addon, media) }.orEmpty() }
                 .distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
             if (episodes.value.isNotEmpty()) {
                 message.value = "Select an episode to find streams"
@@ -205,8 +207,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         fetchStreams(media.copy(id = episode.id))
     }
     private suspend fun fetchStreams(media: MediaItem) {
-        streams.value = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
+        val found = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
             .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
+        val filtered = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
+        streams.value = StreamFilters.rankForBandwidth(filtered, settings.value)
+        if (found.isNotEmpty() && filtered.isEmpty()) message.value = "No streams match the selected anime language filter"
         if (streams.value.isEmpty()) message.value = "No streams returned by connected providers"
     }
     fun saveRealDebridKey(token: String) = runJob {
