@@ -50,6 +50,26 @@ class StremioClientTest {
         val addon = client.inspectAddon("https://example.org")
         assertEquals(8, client.catalog(addon, "Movie").size)
     }
+    @Test fun enrichesTitleMetadataAndPreservesFallbackFields() = runBlocking {
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json")) manifest else
+                """{"meta":{"name":"Verified title","poster":"https://example.org/poster.jpg","description":"Story details","type":"anime"}}""")
+        }
+        val addon = client.inspectAddon("https://example.org")
+        val result = client.metadata(addon, MediaItem("tt123", "series", "tt123"))
+        assertEquals("Verified title", result.title)
+        assertEquals("https://example.org/poster.jpg", result.poster)
+        assertEquals("Story details", result.description)
+        assertTrue(result.isAnime)
+    }
+    @Test fun metadataRetainsExistingTitleWhenProviderOmitsDetails() = runBlocking {
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json")) manifest else """{"meta":{"poster":"javascript:invalid"}}""")
+        }
+        val addon = client.inspectAddon("https://example.org")
+        val initial = MediaItem("tt123", "movie", "Existing", "https://example.org/old.jpg", "Existing description")
+        assertEquals(initial, client.metadata(addon, initial))
+    }
     @Test fun rejectsNonManifestJson() = runBlocking {
         val client = StremioClient { _, _ -> JSONObject("{}") }
         assertTrue(runCatching { client.inspectAddon("https://example.org") }.isFailure)
