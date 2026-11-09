@@ -3,6 +3,7 @@ package com.mutinymedia.android.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.horizontalScroll
+import coil3.compose.AsyncImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,7 +64,6 @@ fun HomeScreen(onBrowse: () -> Unit, onSettings: () -> Unit, onAI: () -> Unit, o
         MutinyPanel("Quick actions") {
             Text("Raised buttons stay readable in dark mode and on smaller screens.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ElevatedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))) } }, modifier = Modifier.weight(1f)) { Text("Web") }
                 ElevatedButton(onClick = onSettings, modifier = Modifier.weight(1f)) { Text("Settings") }
                 ElevatedButton(onClick = onAI, modifier = Modifier.weight(1f)) { Text("Ask AI") }
             }
@@ -97,10 +97,16 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(onClick = { vm.searchCatalog(query) }, enabled = !busy && addons.isNotEmpty()) { Text("Search connected catalogs") }
             catalog.take(40).forEach { item ->
-                Column(Modifier.fillMaxWidth().clickable { vm.loadStreams(item) }.padding(vertical = 8.dp)) {
-                    Text(item.title, fontWeight = FontWeight.Medium)
-                    Text("${item.type} • ${item.id}${if (item.isAnime) " • Anime" else ""}", style = MaterialTheme.typography.labelSmall, color = MutedInk)
-                    TextButton(onClick = { vm.saveToWatchlist(item) }) { Text("Save to watchlist") }
+                Row(Modifier.fillMaxWidth().clickable { vm.loadStreams(item) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!item.poster.isNullOrBlank()) {
+                        AsyncImage(model = item.poster, contentDescription = "${item.title} poster", modifier = Modifier.size(width = 72.dp, height = 106.dp), contentScale = ContentScale.Crop)
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(item.title, fontWeight = FontWeight.Medium)
+                        Text("${item.type} • ${item.id}${if (item.isAnime) " • Anime" else ""}", style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                        TextButton(onClick = { vm.saveToWatchlist(item) }) { Text("Save to watchlist") }
+                    }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
             }
