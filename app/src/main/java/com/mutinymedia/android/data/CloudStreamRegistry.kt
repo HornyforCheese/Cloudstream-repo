@@ -9,7 +9,10 @@ data class CloudStreamPlugin(
     val description: String,
     val version: Int,
     val downloadUrl: String,
-    val repository: String
+    val repository: String,
+    val internalName: String = "",
+    val status: Int = 1,
+    val language: String = ""
 )
 
 /** CloudStream repository and plugin discovery. Never executes untrusted plugin code. */
@@ -42,7 +45,8 @@ class CloudStreamRegistry {
                 if (item.has("status") && item.optInt("status") == 0) continue
                 if (name.isBlank() || path.isBlank()) continue
                 val resolved = runCatching { Network.validateHttps(URL(URL(listUrl), path).toString()) }.getOrNull() ?: continue
-                result += CloudStreamPlugin(name, item.optString("description"), item.optInt("version"), resolved, repositoryUrl)
+                result += CloudStreamPlugin(name, item.optString("description"), item.optInt("version"), resolved, repositoryUrl,
+                    item.optString("internalName"), item.optInt("status", 1), item.optString("language"))
             }
         }
         return result.distinctBy { it.downloadUrl }
