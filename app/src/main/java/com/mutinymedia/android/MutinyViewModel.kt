@@ -57,7 +57,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val chat = MutableStateFlow<List<ChatLine>>(emptyList())
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
-    val games = MutableStateFlow<List<InstalledGame>>(emptyList())
+    val catalogSearch = MutableStateFlow<CatalogSearchResult?>(null)
 
     private val operationMutex = Mutex()
     private val providerSlots = Semaphore(4)
@@ -81,13 +81,16 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                     urls.map { url -> async { providerSlots.withPermit { providerResult { stremio.inspectAddon(url) } } } }
                         .awaitAll().filterNotNull()
                 }
+                if (addons.value.map { it.baseUrl } != result.map { it.baseUrl }) {
+                    catalog.value = emptyList()
+                    catalogSearch.value = null
+                }
                 addons.value = result
                 if (urls.size > result.size) message.value = "Some saved Stremio addons are unreachable"
             }
         }
         viewModelScope.launch { accounts.restoreStremio() }
         viewModelScope.launch { accounts.restoreNuvio() }
-        refreshGames()
     }
     private suspend fun importAccount(data: AccountImport, label: String) {
         store.importAccountData(data.addons, data.items)
@@ -186,23 +189,53 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         message.value = "Discovered ${cloudStreamPlugins.value.size} CloudStream plugins" +
             if (failures.isNotEmpty()) " (${failures.size} repositories failed)" else ""
     }
-    fun searchCatalog(query: String) = runJob {
-        val term = query.trim()
-        if (term.isBlank()) {
-            catalog.value = queryProviders { addon -> stremio.catalog(addon) }
-                .distinctBy { it.type to it.id }
-        } else {
-            // Stream-only addons do not expose catalogs. Use public Cinemeta metadata
-            // for title selection, then resolve streams through installed stream addons.
-            val fromAddons = if (addons.value.isEmpty()) emptyList() else
-                queryProviders { addon -> stremio.catalog(addon, term) }
-            val metadata = providerResult { stremio.catalog(
-                com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term
-            ) }.orEmpty()
-            catalog.value = (fromAddons + metadata).distinctBy { it.type to it.id }
-        }
-        if (catalog.value.isEmpty()) message.value = "No matching titles found. Check the spelling or try another search."
+    fun browseCatalogs() = runJob {
+        catalog.value = loadProviderCatalogs()
+        if (catalog.value.isEmpty()) message.value = "No titles found in your configured catalogs."
     }
+
+    private suspend fun loadProviderCatalogs(): List<MediaItem> =
+        queryProviders { addon -> stremio.catalog(addon) }.distinctBy { it.type to it.id }
+
+    private suspend fun savedCatalogItems(): List<MediaItem> {
+        if (catalog.value.isEmpty() && addons.value.any { it.supportsCatalog }) {
+            catalog.value = loadProviderCatalogs()
+        }
+        return (catalog.value + watchlist.value).distinctBy { it.type to it.id }
+    }
+
+    fun searchTitles(query: String) = runJob {
+        val term = query.trim()
+        if (term.isEmpty()) {
+            catalogSearch.value = null
+            return@runJob
+        }
+        catalogSearch.value = CatalogSearchResult(term, emptyList())
+        val saved = (catalog.value + watchlist.value).filter { it.title.contains(term, ignoreCase = true) }
+        val fromAddons = queryProviders { addon -> stremio.catalog(addon, term) }
+        val publicMetadata = providerResult {
+            stremio.catalog(Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term)
+        }.orEmpty()
+        catalogSearch.value = CatalogSearchResult(term, (fromAddons + saved + publicMetadata).distinctBy { it.type to it.id })
+    }
+
+    fun searchCatalogWithAi(query: String, filters: CatalogFilters) = runJob {
+        val term = query.trim()
+        require(term.isNotEmpty()) { "Describe the titles you want to find." }
+        val key = secrets.readOpenRouter().orEmpty()
+        require(key.isNotBlank()) { "Connect OpenRouter in Settings → Ask AI before using AI search." }
+        val saved = savedCatalogItems()
+        require(saved.isNotEmpty()) { "Add a catalog under Settings → Integrations or save titles to your library first." }
+        val eligible = saved.filter(filters::matches)
+        val candidates = eligible.take(200)
+        catalogSearch.value = CatalogSearchResult(term, emptyList(), candidates.size, eligible.size)
+        if (candidates.isEmpty()) return@runJob
+        val matches = openrouter.matchCatalog(key, settings.value.openRouterModel, term, candidates)
+        catalogSearch.value = CatalogSearchResult(term, matches, candidates.size, eligible.size)
+    }
+
+    fun clearCatalogSearch() { catalogSearch.value = null }
+
     fun lookup(type: String, id: String, anime: Boolean) = runJob {
         if (id.isBlank()) error("Enter a Stremio content ID, such as tt1254207")
         val media = MediaItem(id.trim(), type, id.trim(), isAnime = anime)
@@ -279,13 +312,6 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     fun playTestVideo() {
         currentItem.value = MediaItem("demo", "movie", "Big Buck Bunny • Creative Commons test video")
         activeStream.value = StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample")
-    }
-    fun refreshGames() {
-        viewModelScope.launch {
-            try { games.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { android.installedGames() } }
-            catch (e: CancellationException) { throw e }
-            catch (_: Exception) { message.value = "Unable to query installed games" }
-        }
     }
     fun download(url: String, filename: String) = runJob {
         val id = android.downloadFile(url, filename)

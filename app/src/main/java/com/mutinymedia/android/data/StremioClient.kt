@@ -63,7 +63,11 @@ class StremioClient(
                 all += MediaItem(mediaId, type, name,
                     m.optString("poster").takeIf(String::isNotBlank),
                     m.optString("description").takeIf(String::isNotBlank),
-                    type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"))
+                    type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"),
+                    genres = m.catalogGenres(),
+                    year = m.catalogYear(),
+                    cast = m.catalogNames("cast"),
+                )
             }
         }
         return all.distinctBy { it.type to it.id }.take(300)
@@ -77,7 +81,11 @@ class StremioClient(
         val poster = meta.optString("poster").takeIf { it.startsWith("https://", true) } ?: media.poster
         val description = meta.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: media.description
         return media.copy(title = name, poster = poster, description = description,
-            isAnime = media.isAnime || meta.optString("type") == "anime")
+            isAnime = media.isAnime || meta.optString("type") == "anime",
+            genres = meta.catalogGenres().ifEmpty { media.genres },
+            year = meta.catalogYear() ?: media.year,
+            cast = meta.catalogNames("cast").ifEmpty { media.cast },
+        )
     }
 
     suspend fun episodes(addon: Addon, media: MediaItem): List<Episode> {
@@ -112,3 +120,24 @@ class StremioClient(
         }
     }
 }
+
+private fun JSONObject.catalogGenres(): List<String> = catalogNames("genres").ifEmpty { catalogNames("genre") }
+
+private fun JSONObject.catalogNames(key: String): List<String> {
+    val values = optJSONArray(key) ?: return emptyList()
+    return (0 until minOf(values.length(), 32)).mapNotNull { i ->
+        val name = when (val value = values.opt(i)) {
+            is String -> value
+            is JSONObject -> value.optString("name")
+            else -> ""
+        }.trim().take(100)
+        name.takeIf { it.isNotEmpty() }
+    }.distinct()
+}
+
+private val releaseYearPattern = Regex("""\b(18|19|20)\d{2}\b""")
+
+private fun JSONObject.catalogYear(): Int? =
+    sequenceOf(optString("year"), optString("releaseInfo"), optString("released"))
+        .mapNotNull { releaseYearPattern.find(it)?.value?.toIntOrNull() }
+        .firstOrNull()

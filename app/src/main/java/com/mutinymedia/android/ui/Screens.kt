@@ -52,6 +52,7 @@ fun HomeScreen(
     watchlist: List<MediaItem>,
     catalog: List<MediaItem>,
     onBrowse: () -> Unit,
+    onSearch: () -> Unit,
     onSettings: () -> Unit,
     onAI: () -> Unit,
     onLibrary: () -> Unit,
@@ -97,7 +98,7 @@ fun HomeScreen(
         if (items.isEmpty()) {
             MutinyPanel("Welcome aboard", Modifier.padding(horizontal = 16.dp)) {
                 Text("Connect a Stremio catalog or import your library to see movies, series and anime here.")
-                Button(onClick = onBrowse) { Text("Search for titles") }
+                Button(onClick = onSearch) { Text("Search for titles") }
                 OutlinedButton(onClick = onSettings) { Text("Connect providers") }
             }
         }
@@ -120,7 +121,7 @@ fun HomeScreen(
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onBrowse, modifier = Modifier.weight(1f)) { Text("Search") }
+            OutlinedButton(onClick = onSearch, modifier = Modifier.weight(1f)) { Text("Search") }
             OutlinedButton(onClick = onAI, modifier = Modifier.weight(1f)) { Text("Ask AI") }
         }
     }
@@ -165,7 +166,6 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
     val streams by vm.streams.collectAsStateWithLifecycle()
     val current by vm.currentItem.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
-    var query by rememberSaveable { mutableStateOf("") }
     var directId by rememberSaveable { mutableStateOf("") }
     var type by rememberSaveable { mutableStateOf("movie") }
     var anime by rememberSaveable { mutableStateOf(false) }
@@ -173,29 +173,11 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         PanelTitle("Discover & play", "Find streams using installed Stremio addons or a direct media ID.")
         if (addons.isEmpty()) Text("No Stremio addons connected. Open Settings → Integrations to add a provider.", color = MaterialTheme.colorScheme.error)
-        MutinyPanel("Catalog search") {
-            OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Title search (if addon supports it)") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.searchCatalog(query) }, enabled = !busy && query.isNotBlank()) { Text("Search titles") }
-                OutlinedButton(onClick = { vm.searchCatalog("") }, enabled = !busy && addons.any { it.supportsCatalog }) {
-                    Text("Browse catalogs")
-                }
+        MutinyPanel("Provider catalogs") {
+            OutlinedButton(onClick = { vm.browseCatalogs() }, enabled = !busy && addons.any { it.supportsCatalog }) {
+                Text("Browse catalogs")
             }
-            catalog.take(40).forEach { item ->
-                Row(Modifier.fillMaxWidth().clickable { vm.loadStreams(item) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (!item.poster.isNullOrBlank()) {
-                        AsyncImage(model = item.poster, contentDescription = "${item.title} poster", modifier = Modifier.size(width = 72.dp, height = 106.dp), contentScale = ContentScale.Crop)
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(item.title, fontWeight = FontWeight.Medium)
-                        Text("${item.type} • ${item.id}${if (item.isAnime) " • Anime" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { vm.saveToWatchlist(item) }) { Text("Save to watchlist") }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
-            }
+            CatalogResultRows(catalog.take(40), { vm.loadStreams(it) }, { vm.saveToWatchlist(it) })
         }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         MutinyPanel("Direct Stremio stream lookup") {
@@ -282,25 +264,6 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
 }
 
 @Composable
-fun GamesScreen(vm: MutinyViewModel) {
-    val games by vm.games.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PanelTitle("Games", "Launch installed Android games. Windows game executables cannot run natively here.")
-        Button(onClick = { vm.refreshGames() }) { Text("Refresh installed games") }
-        if (games.isEmpty()) Text("No installed launchable games are labelled as games by Android's package manager.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        games.forEach { game ->
-            MutinyPanel(game.name) {
-                Text(game.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = { if (!vm.android.launchGame(game)) vm.report("Cannot launch ${game.name}") }) { Text("Launch game") }
-            }
-        }
-        MutinyPanel("Remote game streaming") {
-            Text("For PC gameplay, use a separate Sunshine/Moonlight setup. Native Android torrent-game streaming is not part of this build.")
-        }
-    }
-}
-
-@Composable
 fun AiScreen(vm: MutinyViewModel, settings: UserSettings) {
     val messages by vm.chat.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -308,7 +271,7 @@ fun AiScreen(vm: MutinyViewModel, settings: UserSettings) {
     Column(Modifier.fillMaxSize().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PanelTitle("Ask AI", "OpenRouter-powered recommendations. Model: ${settings.openRouterModel}")
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (messages.isEmpty()) Text("Configure your API key under Settings → Ask AI, then ask for film, anime or game recommendations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (messages.isEmpty()) Text("Configure your API key under Settings → Ask AI, then ask for film, TV or anime recommendations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             messages.forEach { msg ->
                 Surface(color = if (msg.fromUser) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.medium) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {

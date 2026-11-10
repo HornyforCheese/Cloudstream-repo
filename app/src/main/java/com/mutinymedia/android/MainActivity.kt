@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -21,7 +22,7 @@ import com.mutinymedia.android.domain.UserSettings
 import com.mutinymedia.android.ui.*
 
 private enum class Section(val display: String, val glyph: String) {
-    HOME("Home", "⌂"), BROWSE("Browse", "⌕"), GAMES("Games", "▣"), AI("Ask AI", "✦"), SETTINGS("Settings", "⚙")
+    HOME("Home", "⌂"), BROWSE("Browse", "▣"), SEARCH("Search", "⌕"), AI("Ask AI", "✦"), SETTINGS("Settings", "⚙")
 }
 
 class MainActivity : ComponentActivity() {
@@ -44,6 +45,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val catalog by vm.catalog.collectAsStateWithLifecycle()
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
+    val searchState = rememberSaveableStateHolder()
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var playing by remember { mutableStateOf(false) }
     var showLibrary by rememberSaveable { mutableStateOf(false) }
@@ -110,13 +112,19 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                             watchlist = watchlist,
                             catalog = catalog,
                             onBrowse = { section = Section.BROWSE },
+                            onSearch = { section = Section.SEARCH },
                             onSettings = { section = Section.SETTINGS },
                             onAI = { section = Section.AI },
                             onLibrary = { showLibrary = true },
                             onSelectTitle = { vm.loadStreams(it); section = Section.BROWSE },
                         )
                         section == Section.BROWSE -> BrowseScreen(vm, settings, addons)
-                        section == Section.GAMES -> GamesScreen(vm)
+                        section == Section.SEARCH -> searchState.SaveableStateProvider("catalog-search") {
+                            SearchScreen(vm) { item ->
+                                vm.loadStreams(item)
+                                section = Section.BROWSE
+                            }
+                        }
                         section == Section.AI -> AiScreen(vm, settings)
                         section == Section.SETTINGS -> SettingsScreen(vm, settings, addons)
                     }

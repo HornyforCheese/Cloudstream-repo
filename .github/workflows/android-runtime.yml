@@ -7,7 +7,6 @@ on:
       - '.github/workflows/android-runtime.yml'
       - '.github/scripts/run-device-tests.sh'
       - 'app/**'
-      - 'test-fixtures/**'
 permissions:
   contents: read
 jobs:
@@ -26,10 +25,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Install build SDK
         run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build app, device tests and game fixture
+      - name: Build app and device tests
         run: |
           ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
-          ./gradlew -p test-fixtures/game-app assembleDebug --stacktrace
       - name: Enable hardware acceleration
         run: |
           test -c /dev/kvm

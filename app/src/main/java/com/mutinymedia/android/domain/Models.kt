@@ -37,6 +37,9 @@ data class MediaItem(
     val poster: String? = null,
     val description: String? = null,
     val isAnime: Boolean = false,
+    val genres: List<String> = emptyList(),
+    val year: Int? = null,
+    val cast: List<String> = emptyList(),
 )
 
 data class Addon(
@@ -66,7 +69,6 @@ data class StreamOption(
 
 data class Episode(val id: String, val title: String, val season: Int, val number: Int)
 
-data class InstalledGame(val name: String, val packageName: String)
 data class ChatLine(val fromUser: Boolean, val text: String)
 
 object StreamFilters {

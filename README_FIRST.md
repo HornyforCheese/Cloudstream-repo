@@ -30,13 +30,13 @@ GitHub Actions runs the same unit tests, lint and debug APK build, and uploads t
 - Metadata-based anime Dub/Sub filtering. Unknown labels are excluded in strict modes. Dual-audio releases may qualify for both modes.
 - Local persistent watchlist: save catalog titles or the current lookup, reopen from Library, remove entries. No account synchronization.
 - OpenRouter recommendations with a configurable model and an API key encrypted in Android Keystore. Configure your key in Settings. Requests need network access, model availability and any required account credit.
-- Installed Android game discovery and launching. Uses Android game category/legacy game flags; unlabelled games may be absent.
+- Search has Movie, TV and Anime filters, provider-supplied genres, and a release-year range. Ask AI beside the field can match free-form requests against loaded titles from saved catalogs and the watchlist using OpenRouter. It submits up to 200 eligible candidate titles per request and can only return entries from that set.
 - Direct HTTPS downloads through Android DownloadManager, saved in app-specific external Downloads. Android handles notifications and network retries. These files are removed when uninstalling the app.
 - CloudStream repository metadata verification/persistence. This is repository discovery, without executable plugins.
 
 ## Integration limits
 
-Nuvio authentication/sync, Stremio account sync, executable CloudStream .cs3 plugins, torrent/debrid engines, PC game execution/streaming, Cast, PiP, background media service, certified TV support and DRM/offline subscription playback require separate integrations. This revision does not claim Windows feature parity. Real-provider playback, OpenRouter, game launching and DownloadManager still need device verification with your setup.
+Nuvio authentication/sync, Stremio account sync, executable CloudStream .cs3 plugins, torrent/debrid engines, Cast, PiP, background media service, certified TV support and DRM/offline subscription playback require separate integrations. This revision does not claim Windows feature parity. Real-provider playback, OpenRouter and DownloadManager still need device verification with your setup.
 
 ## Validation and assets
 
@@ -46,4 +46,4 @@ Original reference images are in reference/. Secrets are never bundled; applicat
 
 ## Device smoke suite
 
-See RUNTIME_DEBUG.md for the compiled instrumentation suite, optional game fixture and commands to run it on a working Android device/emulator. Device execution is not verified here.
+See RUNTIME_DEBUG.md for the compiled instrumentation suite and commands to run it on a working Android device/emulator. Device execution is not verified here.

@@ -87,13 +87,18 @@ class SettingsStore(private val context: Context) {
             val id = o.optString("id"); val type = o.optString("type"); val title = o.optString("title")
             if (id.isBlank() || title.isBlank() || type !in listOf("movie", "series", "anime")) null
             else MediaItem(id, type, title, o.optString("poster").takeIf(String::isNotBlank),
-                o.optString("description").takeIf(String::isNotBlank), o.optBoolean("anime"))
+                o.optString("description").takeIf(String::isNotBlank), o.optBoolean("anime"),
+                genres = parseStringList(o.optJSONArray("genres")?.toString()),
+                year = o.optInt("year").takeIf { it in 1800..2099 },
+                cast = parseStringList(o.optJSONArray("cast")?.toString()),
+            )
         }
     }.getOrDefault(emptyList())
     private fun encodeWatchlist(items: List<MediaItem>): String = JSONArray().apply {
         items.forEach { item -> put(JSONObject().put("id", item.id).put("type", item.type)
             .put("title", item.title).put("poster", item.poster ?: "")
-            .put("description", item.description ?: "").put("anime", item.isAnime)) }
+            .put("description", item.description ?: "").put("anime", item.isAnime)
+            .put("genres", JSONArray(item.genres)).put("year", item.year).put("cast", JSONArray(item.cast))) }
     }.toString()
 
     suspend fun setThemePreset(value: ThemePreset) {
