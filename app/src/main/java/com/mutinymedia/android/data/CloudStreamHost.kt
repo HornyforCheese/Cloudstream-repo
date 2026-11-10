@@ -48,10 +48,12 @@ class CloudStreamHost(private val context: Context) {
                 Class.forName("com.lagradost.cloudstream3.plugins.BasePlugin", false, context.classLoader)
                 Class.forName("com.lagradost.cloudstream3.MainAPI", false, context.classLoader)
                 Class.forName("com.lagradost.cloudstream3.APIHolder", false, context.classLoader)
+                Class.forName("com.lagradost.cloudstream3.utils.ExtractorApi", false, context.classLoader)
+                Class.forName("com.lagradost.cloudstream3.plugins.Plugin", false, context.classLoader)
             }.isSuccess
             if (!hostAvailable) return@withContext ProviderStatus(
                 packageId, className, State.INCOMPATIBLE,
-                "CloudStream host API is absent. Package is installed but providers cannot execute."
+                "CloudStream host API (BasePlugin, MainAPI, APIHolder, ExtractorApi or Plugin) is missing. The extension cannot execute."
             )
             // Loading class metadata does not execute the plugin. Registration must be
             // performed by a compatible host and is not claimed here.
