@@ -295,10 +295,15 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         }
         catalogSearch.value = CatalogSearchResult(term, emptyList())
         val saved = (catalog.value + watchlist.value).filter { it.title.contains(term, ignoreCase = true) }
-        val fromAddons = queryProviders { addon -> stremio.catalog(addon, term) }
-        val publicMetadata = providerResult {
-            stremio.catalog(Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term)
-        }.orEmpty()
+        val (fromAddons, publicMetadata) = coroutineScope {
+            val addonsSearch = async { queryProviders { addon -> stremio.catalog(addon, term) } }
+            val fallbackSearch = async {
+                providerResult {
+                    stremio.catalog(Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term)
+                }.orEmpty()
+            }
+            addonsSearch.await() to fallbackSearch.await()
+        }
         catalogSearch.value = CatalogSearchResult(term, (fromAddons + saved + publicMetadata).distinctBy { it.type to it.id })
     }
 
