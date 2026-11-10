@@ -17,6 +17,8 @@ import com.mutinymedia.android.MutinyViewModel
 import com.mutinymedia.android.domain.Addon
 import com.mutinymedia.android.domain.AnimeStreamMode
 import com.mutinymedia.android.domain.CodecPreference
+import com.mutinymedia.android.domain.ThemeFont
+import com.mutinymedia.android.domain.ThemePreset
 import com.mutinymedia.android.domain.UserSettings
 import kotlin.math.roundToInt
 
@@ -46,7 +48,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
                     SettingsLink("Watch party", "Join friends with a party code") { tab = SettingsTab.WATCH_PARTY }
                 }
                 MutinyPanel("Personalisation") {
-                    SettingsLink("Appearance", "Themes, app icon and language") { tab = SettingsTab.APPEARANCE }
+                    SettingsLink("Appearance", "Theme Studio, colours and fonts") { tab = SettingsTab.APPEARANCE }
                     SettingsLink("Layout", "Home, cards, details, streams and navigation") { tab = SettingsTab.LAYOUT }
                 }
                 MutinyPanel("Content") {
@@ -89,7 +91,8 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
             SettingsTab.AI -> AiSettings(vm, s)
             SettingsTab.DOWNLOADS -> DirectDownloadSettings(vm)
             SettingsTab.ABOUT -> AboutSettings()
-            SettingsTab.WATCH_PARTY, SettingsTab.APPEARANCE, SettingsTab.LAYOUT,
+            SettingsTab.APPEARANCE -> ThemeStudioSettings(vm, s)
+            SettingsTab.WATCH_PARTY, SettingsTab.LAYOUT,
             SettingsTab.TRACKING, SettingsTab.TMDB, SettingsTab.MDBLIST,
             SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD -> {
                 MutinyPanel(tab.label) {
@@ -101,11 +104,46 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
 }
 
 @Composable
+private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
+    MutinyPanel("Theme Studio") {
+        Text("Colour preset", style = MaterialTheme.typography.titleSmall)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ThemePreset.entries.forEach { preset ->
+                FilterChip(
+                    selected = settings.themePreset == preset,
+                    onClick = { vm.runJob { vm.store.setThemePreset(preset) } },
+                    label = { Text(preset.label) },
+                )
+            }
+        }
+        OutlinedButton(onClick = { vm.runJob { vm.store.randomizeThemePreset() } }) {
+            Text("Randomise theme")
+        }
+        Text("App font", style = MaterialTheme.typography.titleSmall)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ThemeFont.entries.forEach { font ->
+                FilterChip(
+                    selected = settings.themeFont == font,
+                    onClick = { vm.runJob { vm.store.setThemeFont(font) } },
+                    label = { Text(font.label) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
     TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth()) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MutedInk)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -137,24 +175,24 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
         OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
             Text("Discover available extensions")
         }
-        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MutedInk)
+        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedButton(onClick = { vm.inspectCloudStreamHost() }, enabled = installedPlugins.isNotEmpty() && !busy) {
             Text("Check installed extension compatibility")
         }
         hostStatuses.forEach { status ->
             Text("${status.packageId.take(10)}: ${status.state} • ${status.detail}",
-                style = MaterialTheme.typography.bodySmall, color = MutedInk)
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         plugins.forEach { plugin ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(plugin.name, fontWeight = FontWeight.SemiBold)
-                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val pluginId = remember(plugin.downloadUrl) {
                     java.security.MessageDigest.getInstance("SHA-256").digest(plugin.downloadUrl.toByteArray())
                         .joinToString("") { "%02x".format(it) }
                 }
                 Text(if (pluginId in installedPlugins) "Package downloaded • runtime not available" else "Not installed",
-                    style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (pluginId in installedPlugins) {
                         OutlinedButton(onClick = { vm.uninstallCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Remove") }
@@ -177,15 +215,15 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
             label = { Text("Addon URL or manifest.json") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.addAddon(addonUrl); addonUrl = "" }, enabled = (addonUrl.trim().startsWith("https://", true) || addonUrl.trim().startsWith("stremio://", true)) && !busy) { Text("Connect add-on") }
         OutlinedButton(onClick = { vm.refreshAddons() }, enabled = !busy && s.addonUrls.isNotEmpty()) { Text("Retry saved addons") }
-        if (s.addonUrls.isEmpty()) Text("No Stremio addons installed", color = MutedInk)
+        if (s.addonUrls.isEmpty()) Text("No Stremio addons installed", color = MaterialTheme.colorScheme.onSurfaceVariant)
         s.addonUrls.forEach { url ->
             val live = addons.firstOrNull { it.baseUrl == url }
             Column(Modifier.fillMaxWidth().padding(top = 5.dp)) {
                 Text(live?.title ?: url, fontWeight = FontWeight.SemiBold)
-                Text(if (live != null) "Manifest verified • catalog=${live.supportsCatalog} • stream=${live.supportsStreams}" else "Not reachable or invalid manifest", color = if (live != null) Mint else MaterialTheme.colorScheme.error,
+                Text(if (live != null) "Manifest verified • catalog=${live.supportsCatalog} • stream=${live.supportsStreams}" else "Not reachable or invalid manifest", color = if (live != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(url, modifier = Modifier.weight(1f), maxLines = 2, style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                    Text(url, modifier = Modifier.weight(1f), maxLines = 2, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = { vm.removeAddon(url) }) { Text("Remove") }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
@@ -203,16 +241,16 @@ private fun BandwidthSettings(vm: MutinyViewModel, s: UserSettings) {
             Text("Use ultra-low-bandwidth mode", Modifier.weight(1f))
             Switch(s.lowBandwidth, onCheckedChange = { vm.runJob { vm.store.setLowBandwidth(it) } })
         }
-        Text("Only compatible streams can be selected at this rate. This is not a guaranteed bandwidth cap or transcoder.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+        Text("Only compatible streams can be selected at this rate. This is not a guaranteed bandwidth cap or transcoder.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
     MutinyPanel("Maximum preferred video bitrate") {
-        Text("${slider.roundToInt()} kbps", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium, color = Mint)
+        Text("${slider.roundToInt()} kbps", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.secondary)
         Slider(value = slider, onValueChange = { slider = ((it / 100).roundToInt() * 100).coerceIn(200, 1500).toFloat() },
             onValueChangeFinished = { vm.runJob { vm.store.setVideoKbps(slider.roundToInt()) } },
             valueRange = 200f..1500f, steps = 12)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("200 kbps", color = MutedInk)
-            Text("1,500 kbps", color = MutedInk)
+            Text("200 kbps", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("1,500 kbps", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     MutinyPanel("Maximum video resolution") {
@@ -223,14 +261,14 @@ private fun BandwidthSettings(vm: MutinyViewModel, s: UserSettings) {
         }
     }
     MutinyPanel("Video codec preference") {
-        Text("Used for ranking when names supply codec labels. Playback still depends on the Android device's decoder.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+        Text("Used for ranking when names supply codec labels. Playback still depends on the Android device's decoder.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         FilterChip(selected = s.codec == CodecPreference.EFFICIENT, onClick = { vm.runJob { vm.store.setCodec(CodecPreference.EFFICIENT) } },
             label = { Text("Prefer AV1 / HEVC") })
         FilterChip(selected = s.codec == CodecPreference.COMPATIBLE, onClick = { vm.runJob { vm.store.setCodec(CodecPreference.COMPATIBLE) } },
             label = { Text("Prefer H.264") })
     }
     MutinyPanel("Audio bitrate preference") {
-        Text("Applies an audio track bitrate constraint when multiple tracks exist. A single higher-bitrate track may still be used for compatibility.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+        Text("Applies an audio track bitrate constraint when multiple tracks exist. A single higher-bitrate track may still be used for compatibility.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(32, 48, 64).forEach { amount ->
                 FilterChip(selected = s.audioKbps == amount, onClick = { vm.runJob { vm.store.setAudioKbps(amount) } }, label = { Text("$amount kbps") })
@@ -240,11 +278,11 @@ private fun BandwidthSettings(vm: MutinyViewModel, s: UserSettings) {
             Text("Automatic bitrate switching when supported", Modifier.weight(1f))
             Switch(checked = s.adaptive, onCheckedChange = { vm.runJob { vm.store.setAdaptive(it) } })
         }
-        Text("HLS/DASH may expose adaptive tracks. A fixed MP4 or torrent cannot be converted to adaptive video by a setting.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+        Text("HLS/DASH may expose adaptive tracks. A fixed MP4 or torrent cannot be converted to adaptive video by a setting.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
     MutinyPanel("Preferred stream target") {
-        Text("${slider.roundToInt() + s.audioKbps} kbps", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Mint)
-        Text("Video + audio target, excluding transport overhead. Requires matching streams or upstream transcoding.", color = MutedInk)
+        Text("${slider.roundToInt() + s.audioKbps} kbps", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary)
+        Text("Video + audio target, excluding transport overhead. Requires matching streams or upstream transcoding.", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -263,7 +301,7 @@ private fun AnimeSettings(vm: MutinyViewModel, s: UserSettings) {
                 }, modifier = Modifier.weight(1f))
             }
         }
-        Text("Only applies to titles marked as anime. Unlabelled results are excluded in Dub/Sub mode rather than misidentified. Dual-audio releases may qualify for both.", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+        Text("Only applies to titles marked as anime. Unlabelled results are excluded in Dub/Sub mode rather than misidentified. Dual-audio releases may qualify for both.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -291,11 +329,11 @@ private fun DirectDownloadSettings(vm: MutinyViewModel) {
     var name by remember { mutableStateOf("video.mp4") }
     PanelTitle("Downloads", "Native Android DownloadManager for direct HTTPS files.")
     MutinyPanel("Save a direct file") {
-        Text("Does not fetch magnet links, torrent pieces or encrypted subscription content.", color = MutedInk)
+        Text("Does not fetch magnet links, torrent pieces or encrypted subscription content.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("HTTPS file URL") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("File name") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { vm.download(url, name) }, enabled = url.startsWith("https://") && name.isNotBlank()) { Text("Queue download") }
-        Text("Saved to the app's external Downloads directory. Android handles network interruptions and notifications.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+        Text("Saved to the app's external Downloads directory. Android handles network interruptions and notifications.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -317,7 +355,7 @@ private fun DebridSettings(vm: MutinyViewModel) {
     val saved = remember(account, busy) { vm.secrets.readSecret("debrid_real_debrid") != null }
     MutinyPanel("Real-Debrid") {
         Text("Resolve supported HTTPS hoster links through your own Real-Debrid account. Torrent magnets and cached torrent conversion are not supported yet.")
-        Text(if (account != null) "Connected: $account" else if (saved) "API key saved (not verified in this session)" else "No API key saved", color = MutedInk)
+        Text(if (account != null) "Connected: $account" else if (saved) "API key saved (not verified in this session)" else "No API key saved", color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Real-Debrid API token") },
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.saveRealDebridKey(key); key = "" }, enabled = key.isNotBlank() && !busy) { Text("Verify and save API key") }
@@ -325,6 +363,6 @@ private fun DebridSettings(vm: MutinyViewModel) {
             OutlinedButton(onClick = { vm.verifyRealDebrid() }, enabled = !busy) { Text("Check connection") }
             TextButton(onClick = { vm.saveRealDebridKey("") }, enabled = !busy) { Text("Remove saved key") }
         }
-        Text("Credentials are encrypted locally with Android Keystore and are never stored in the source repository.", style = MaterialTheme.typography.bodySmall, color = MutedInk)
+        Text("Credentials are encrypted locally with Android Keystore and are never stored in the source repository.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

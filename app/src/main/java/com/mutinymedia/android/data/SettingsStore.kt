@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mutinymedia.android.domain.AnimeStreamMode
 import com.mutinymedia.android.domain.CodecPreference
+import com.mutinymedia.android.domain.ThemeFont
+import com.mutinymedia.android.domain.ThemePreset
 import com.mutinymedia.android.domain.UserSettings
 import com.mutinymedia.android.domain.MediaItem
 import org.json.JSONObject
@@ -32,6 +34,8 @@ class SettingsStore(private val context: Context) {
         val repos = stringPreferencesKey("cloudstream_repository_urls")
         val model = stringPreferencesKey("openrouter_model")
         val watchlist = stringPreferencesKey("watchlist_v1")
+        val themePreset = stringPreferencesKey("theme_preset")
+        val themeFont = stringPreferencesKey("theme_font")
     }
     val settings: Flow<UserSettings> = context.mutinyDataStore.data
         .catch { if (it is IOException) emit(androidx.datastore.preferences.core.emptyPreferences()) else throw it }
@@ -47,6 +51,8 @@ class SettingsStore(private val context: Context) {
                 addonUrls = parseStringList(p[K.addons]),
                 extensionRepositories = parseStringList(p[K.repos]),
                 openRouterModel = p[K.model] ?: "openai/gpt-4o-mini",
+                themePreset = enumValueOrDefault(p[K.themePreset], ThemePreset.MUTINY),
+                themeFont = enumValueOrDefault(p[K.themeFont], ThemeFont.DEFAULT),
             )
         }
     /** Local-only library. No account-sync claims; writes are atomic via DataStore. */
@@ -88,6 +94,21 @@ class SettingsStore(private val context: Context) {
             .put("title", item.title).put("poster", item.poster ?: "")
             .put("description", item.description ?: "").put("anime", item.isAnime)) }
     }.toString()
+
+    suspend fun setThemePreset(value: ThemePreset) {
+        context.mutinyDataStore.edit { it[K.themePreset] = value.name }
+    }
+
+    suspend fun randomizeThemePreset() {
+        context.mutinyDataStore.edit { p ->
+            val current = enumValueOrDefault(p[K.themePreset], ThemePreset.MUTINY)
+            p[K.themePreset] = ThemePreset.entries.filterNot { it == current }.random().name
+        }
+    }
+
+    suspend fun setThemeFont(value: ThemeFont) {
+        context.mutinyDataStore.edit { it[K.themeFont] = value.name }
+    }
 
     suspend fun setLowBandwidth(value: Boolean) { context.mutinyDataStore.edit { it[K.low] = value } }
     suspend fun setVideoKbps(value: Int) { context.mutinyDataStore.edit { it[K.video] = value.coerceIn(200, 1500) } }

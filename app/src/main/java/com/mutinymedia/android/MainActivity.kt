@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mutinymedia.android.domain.UserSettings
 import com.mutinymedia.android.ui.*
 
 private enum class Section(val display: String, val glyph: String) {
@@ -26,13 +27,18 @@ private enum class Section(val display: String, val glyph: String) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MutinyTheme { MutinyRoot() } }
+        setContent { MutinyRoot() }
     }
 }
 
 @Composable
 fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    MutinyTheme(settings.themePreset, settings.themeFont) { MutinyContent(vm, settings) }
+}
+
+@Composable
+private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val addons by vm.addons.collectAsStateWithLifecycle()
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val catalog by vm.catalog.collectAsStateWithLifecycle()
@@ -41,7 +47,6 @@ fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var playing by remember { mutableStateOf(false) }
     var showLibrary by rememberSaveable { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     BackHandler(playing || section != Section.HOME || showLibrary) {
         if (playing) { playing = false; vm.activeStream.value = null }
         else if (showLibrary) showLibrary = false
@@ -62,12 +67,12 @@ fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
                         Spacer(Modifier.width(9.dp))
                         Text("Mutiny Media", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
-                        Text("ANDROID", style = MaterialTheme.typography.labelSmall, color = Mint)
+                        Text("ANDROID", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
             },
             bottomBar = {
-                if (!expanded) NavigationBar(containerColor = RaisedPurple) {
+                if (!expanded) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Section.entries.forEach { s ->
                         NavigationBarItem(selected = section == s && !showLibrary,
                             onClick = { section = s; showLibrary = false },
@@ -81,7 +86,7 @@ fun MutinyRoot(vm: MutinyViewModel = viewModel()) {
             },
         ) { inner ->
             Row(Modifier.fillMaxSize().padding(inner)) {
-                if (expanded) NavigationRail(containerColor = RaisedPurple) {
+                if (expanded) NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
                     Spacer(Modifier.height(20.dp))
                     Section.entries.forEach { s ->
                         NavigationRailItem(selected = section == s && !showLibrary,

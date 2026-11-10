@@ -2,6 +2,12 @@ package com.mutinymedia.android.domain
 
 enum class AnimeStreamMode { ALL, DUB, SUB }
 enum class CodecPreference { EFFICIENT, COMPATIBLE }
+enum class ThemePreset(val label: String) {
+    MUTINY("Mutiny"), OCEAN("Deep Ocean"), FOREST("Emerald Cove"), EMBER("Ember")
+}
+enum class ThemeFont(val label: String) {
+    DEFAULT("System"), SERIF("Serif"), MONOSPACE("Monospace")
+}
 
 data class UserSettings(
     val lowBandwidth: Boolean = false,
@@ -14,6 +20,8 @@ data class UserSettings(
     val addonUrls: List<String> = emptyList(),
     val extensionRepositories: List<String> = emptyList(),
     val openRouterModel: String = "openai/gpt-4o-mini",
+    val themePreset: ThemePreset = ThemePreset.MUTINY,
+    val themeFont: ThemeFont = ThemeFont.DEFAULT,
 ) {
     val targetKbps: Int get() = videoKbps + audioKbps
 }

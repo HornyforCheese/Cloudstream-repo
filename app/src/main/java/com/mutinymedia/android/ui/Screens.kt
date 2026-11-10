@@ -32,16 +32,16 @@ fun PanelTitle(title: String, subtitle: String) {
     Column(Modifier.fillMaxWidth().padding(bottom = 18.dp)) {
         Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MutedInk)
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 fun MutinyPanel(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    ElevatedCard(modifier = modifier.fillMaxWidth(), colors = CardDefaults.elevatedCardColors(containerColor = RaisedPurple),
+    ElevatedCard(modifier = modifier.fillMaxWidth(), colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Mint)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)
             content()
         }
     }
@@ -84,7 +84,7 @@ fun HomeScreen(
                     contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f)))
                 Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("FEATURED ON MUTINY MEDIA", color = Mint, style = MaterialTheme.typography.labelMedium)
+                    Text("FEATURED ON MUTINY MEDIA", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
                     Text(hero.title, style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.Bold, maxLines = 2)
                     hero.description?.takeIf { it.isNotBlank() }?.let {
@@ -116,7 +116,7 @@ fun HomeScreen(
             }
             if (filtered.isNotEmpty()) PosterShelf(category, filtered, onSelectTitle, onBrowse)
             else Text("No $category titles loaded yet. Search to discover more.",
-                modifier = Modifier.padding(horizontal = 18.dp), color = MutedInk)
+                modifier = Modifier.padding(horizontal = 18.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,7 +131,7 @@ private fun PosterShelf(title: String, items: List<MediaItem>, onSelectTitle: (M
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            TextButton(onClick = onMore) { Text("See all ›", color = Mint) }
+            TextButton(onClick = onMore) { Text("See all ›", color = MaterialTheme.colorScheme.secondary) }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items.distinctBy { it.type to it.id }.take(20).forEach { item ->
@@ -143,13 +143,13 @@ private fun PosterShelf(title: String, items: List<MediaItem>, onSelectTitle: (M
                     } else {
                         Card(Modifier.fillMaxWidth().height(194.dp)) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("☠", style = MaterialTheme.typography.headlineLarge, color = Mint)
+                                Text("☠", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.secondary)
                             }
                         }
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                    Text(item.type.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                    Text(item.type.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -190,7 +190,7 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                     }
                     Column(Modifier.weight(1f)) {
                         Text(item.title, fontWeight = FontWeight.Medium)
-                        Text("${item.type} • ${item.id}${if (item.isAnime) " • Anime" else ""}", style = MaterialTheme.typography.labelSmall, color = MutedInk)
+                        Text("${item.type} • ${item.id}${if (item.isAnime) " • Anime" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = { vm.saveToWatchlist(item) }) { Text("Save to watchlist") }
                     }
                 }
@@ -222,7 +222,7 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                     }
                     Column {
                         Text(current!!.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text(current!!.type.replaceFirstChar(Char::uppercase), color = MutedInk)
+                        Text(current!!.type.replaceFirstChar(Char::uppercase), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         current!!.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
@@ -251,14 +251,14 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
             val ranked = StreamFilters.rankForBandwidth(filtered, settings)
             MutinyPanel("Sources for ${current!!.title}") {
                 OutlinedButton(onClick = { vm.saveToWatchlist(current!!) }) { Text("Save title to watchlist") }
-                Text("${streams.size} sources returned • ${ranked.size} matched", color = MutedInk)
+                Text("${streams.size} sources returned • ${ranked.size} matched", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (isAnime) Text("Anime language mode: ${settings.animeMode.name}. Change in Settings → Anime.")
-                if (settings.lowBandwidth) Text("Prioritising ≤${settings.resolution}p and ~${settings.videoKbps} kbps when providers supply metadata.", color = Mint)
+                if (settings.lowBandwidth) Text("Prioritising ≤${settings.resolution}p and ~${settings.videoKbps} kbps when providers supply metadata.", color = MaterialTheme.colorScheme.secondary)
                 if (streams.isNotEmpty() && ranked.isEmpty()) Text("No verified ${settings.animeMode.name.lowercase()} tags. Switch to All in Anime settings to reveal unlabelled streams.", color = MaterialTheme.colorScheme.error)
                 ranked.take(70).forEach { option ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(option.title, maxLines = 3, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                        Text(option.provider, color = MutedInk, style = MaterialTheme.typography.labelSmall)
+                        Text(option.provider, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         Button(onClick = { vm.play(option) }, enabled = option.playable, modifier = Modifier.fillMaxWidth()) {
                             Text(if (option.playable) "Play HTTPS stream" else "Torrent / unsupported stream")
                         }
@@ -287,10 +287,10 @@ fun GamesScreen(vm: MutinyViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PanelTitle("Games", "Launch installed Android games. Windows game executables cannot run natively here.")
         Button(onClick = { vm.refreshGames() }) { Text("Refresh installed games") }
-        if (games.isEmpty()) Text("No installed launchable games are labelled as games by Android's package manager.", color = MutedInk)
+        if (games.isEmpty()) Text("No installed launchable games are labelled as games by Android's package manager.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         games.forEach { game ->
             MutinyPanel(game.name) {
-                Text(game.packageName, style = MaterialTheme.typography.bodySmall, color = MutedInk)
+                Text(game.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = { if (!vm.android.launchGame(game)) vm.report("Cannot launch ${game.name}") }) { Text("Launch game") }
             }
         }
@@ -308,11 +308,11 @@ fun AiScreen(vm: MutinyViewModel, settings: UserSettings) {
     Column(Modifier.fillMaxSize().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PanelTitle("Ask AI", "OpenRouter-powered recommendations. Model: ${settings.openRouterModel}")
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (messages.isEmpty()) Text("Configure your API key under Settings → Ask AI, then ask for film, anime or game recommendations.", color = MutedInk)
+            if (messages.isEmpty()) Text("Configure your API key under Settings → Ask AI, then ask for film, anime or game recommendations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             messages.forEach { msg ->
-                Surface(color = if (msg.fromUser) MaterialTheme.colorScheme.surfaceVariant else RaisedPurple, shape = MaterialTheme.shapes.medium) {
+                Surface(color = if (msg.fromUser) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.medium) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(if (msg.fromUser) "You" else "Mutiny AI", style = MaterialTheme.typography.labelSmall, color = Mint)
+                        Text(if (msg.fromUser) "You" else "Mutiny AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                         Spacer(Modifier.height(5.dp))
                         Text(msg.text)
                     }
@@ -333,10 +333,10 @@ fun LibraryScreen(vm: MutinyViewModel, onBack: () -> Unit, onBrowse: () -> Unit)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PanelTitle("My Library", "Saved locally on this device. No external account synchronization.")
         OutlinedButton(onClick = onBack) { Text("Back") }
-        if (saved.isEmpty()) Text("Your watchlist is empty. Save a title from Browse to find it here later.", color = MutedInk)
+        if (saved.isEmpty()) Text("Your watchlist is empty. Save a title from Browse to find it here later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         saved.forEach { item ->
             MutinyPanel(item.title) {
-                Text("${item.type} • ${item.id}", color = MutedInk, style = MaterialTheme.typography.bodySmall)
+                Text("${item.type} • ${item.id}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.loadStreams(item); onBrowse() }) { Text("Find streams") }
                     OutlinedButton(onClick = { vm.removeFromWatchlist(item) }) { Text("Remove") }
