@@ -6,7 +6,6 @@ import android.content.ContentValues
 import android.provider.MediaStore
 import android.os.Build
 import android.graphics.Bitmap
-import android.os.ParcelFileDescriptor
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.test.*
@@ -70,9 +69,6 @@ class RuntimeSmokeTest {
     }
 
     private fun nav(label: String) { rule.onAllNodesWithText(label).onLast().performClick() }
-    private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
-        InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command)
-    ).bufferedReader().use { it.readText() }
     private fun playerView(view: View): PlayerView? {
         if (view is PlayerView) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) playerView(view.getChildAt(index))?.let { return it }
@@ -198,20 +194,14 @@ class RuntimeSmokeTest {
         video.delete()
     }
 
-    @Test fun test05_installedGameDiscoveryAndLaunch() {
-        val vm = model()
-        val game = vm.android.installedGames().firstOrNull { it.packageName == "com.mutinymedia.fixturegame" }
-        org.junit.Assume.assumeNotNull(game) // Install the isolated game fixture to exercise this optional test.
-        nav("Games")
-        rule.onNodeWithText("Debug Game Fixture").assertExists()
-        assertTrue(vm.android.launchGame(game!!))
-        try {
-            rule.waitUntil(120_000) {
-                shell("dumpsys activity activities").lineSequence().any { it.contains("mResumedActivity") && it.contains(game.packageName) }
-            }
-            screenshot("game-launched")
-        } finally { shell("input keyevent 4") }
+    @Test fun test05_searchScreenShowsAiAndCatalogFilters() {
+        nav("Search")
+        rule.onNodeWithText("Search titles").assertExists()
+        rule.onNodeWithText("Load saved catalogs").assertExists()
+        rule.onNodeWithTag("catalog-ask-ai").assertExists()
+        rule.onNodeWithText("Filters").assertExists()
     }
+
     private fun assertHttpsPlayback(url: String,label: String) {
         val vm=model()
         rule.runOnIdle { vm.play(StreamOption("https-$label", "$label HTTPS fixture",url,"Public test media")) }
@@ -232,6 +222,7 @@ class RuntimeSmokeTest {
         screenshot("https-$label")
         rule.onNodeWithText("Close").performClick()
     }
+
     @Test fun test06_publicStremioManifestCatalogAndEpisodes() = runBlocking {
         val client=com.mutinymedia.android.data.StremioClient()
         val addon=client.inspectAddon("https://v3-cinemeta.strem.io/manifest.json")

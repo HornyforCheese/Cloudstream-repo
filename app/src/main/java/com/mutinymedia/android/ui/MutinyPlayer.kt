@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import kotlinx.coroutines.delay
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.mutinymedia.android.domain.StreamOption
@@ -31,9 +33,13 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
     var savedPosition by rememberSaveable(stream.url) { mutableLongStateOf(0L) }
     var shouldPlay by rememberSaveable(stream.url) { mutableStateOf(true) }
     val selector = remember(stream.url) { DefaultTrackSelector(context) }
+    val bandwidthMeter = remember(stream.url, stream.headers) {
+        DefaultBandwidthMeter.Builder(context).build()
+    }
     val player = remember(stream.url, stream.headers) {
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
         ExoPlayer.Builder(context).setTrackSelector(selector)
+            .setBandwidthMeter(bandwidthMeter)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))).build().apply {
             setMediaItem(MediaItem.fromUri(requireNotNull(stream.url)))
             seekTo(savedPosition)
@@ -80,6 +86,16 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
     }
     var resizeMode by remember(stream.url) { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var playbackError by remember(stream.url) { mutableStateOf<String?>(null) }
+    var showBitrate by rememberSaveable(stream.url) { mutableStateOf(false) }
+    var bitrateText by remember(player) { mutableStateOf<String?>(null) }
+    LaunchedEffect(player, showBitrate) {
+        while (showBitrate) {
+            bitrateText = "Video: ${formatBitrate(player.videoFormat?.bitrate?.toLong())} · " +
+                "Audio: ${formatBitrate(player.audioFormat?.bitrate?.toLong())} · " +
+                "Network estimate: ${formatBitrate(bandwidthMeter.bitrateEstimate)}"
+            delay(1500)
+        }
+    }
     DisposableEffect(player) {
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -92,7 +108,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
-                Text("Now playing", style = MaterialTheme.typography.titleSmall, color = Mint)
+                Text("Now playing", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
                 Text(stream.title, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
             }
             OutlinedButton(onClick = { resizeMode = if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT }) {
@@ -114,11 +130,25 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        TextButton(onClick = { showBitrate = !showBitrate }) {
+            Text(if (showBitrate) "Hide bitrate" else "Show bitrate")
+        }
+        if (showBitrate) {
+            Text(
+                bitrateText.orEmpty(),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         if (playbackError != null) {
             Text(playbackError!!, modifier = Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error)
             OutlinedButton(onClick = { playbackError = null; player.prepare(); player.play() }) { Text("Retry playback") }
         }
         if (settings.lowBandwidth) Text("Low bandwidth preference: ${settings.videoKbps} kbps, ${settings.resolution}p. Only available encoded tracks can be selected.",
-            modifier = Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MutedInk)
+            modifier = Modifier.fillMaxWidth().padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+private fun formatBitrate(bitsPerSecond: Long?): String =
+    if (bitsPerSecond == null || bitsPerSecond <= 0) "Unavailable"
+    else "${bitsPerSecond / 1000} kbps"

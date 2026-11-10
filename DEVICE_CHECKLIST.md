@@ -11,6 +11,6 @@ Build checks verify compilation, static analysis and unit behavior. Perform thes
 - Verify low-bandwidth settings persist; compare available track selection and confirm unknown anime language sources are excluded in Dub/Sub modes.
 - Configure an OpenRouter model/key in Settings. Send a question; test no key, invalid key, insufficient credit and offline states. Clear the key and confirm it is no longer saved.
 - Queue a small HTTPS file; check DownloadManager notification and file in Android/data/com.mutinymedia.android/files/Download. Files are app-specific and removed when the app is uninstalled.
-- Refresh and launch an installed Android game. Only packages Android labels as games are listed.
+- Open Search, load saved catalogs, and verify Movie, TV, Anime, genre and year filters. With an OpenRouter key, search by an actor or a style and verify results are drawn from the saved catalog candidates.
 
 Nuvio login/sync, Stremio account sync, executable CloudStream plugins, torrent/debrid engines, Cast, PiP, background media services and DRM/offline subscription playback are not implemented.

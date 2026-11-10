@@ -1,7 +1,17 @@
 package com.mutinymedia.android.domain
 
+const val DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+data class OpenRouterModel(val id: String, val name: String)
+
 enum class AnimeStreamMode { ALL, DUB, SUB }
 enum class CodecPreference { EFFICIENT, COMPATIBLE }
+enum class ThemePreset(val label: String) {
+    MUTINY("Mutiny"), OCEAN("Deep Ocean"), FOREST("Emerald Cove"), EMBER("Ember")
+}
+enum class ThemeFont(val label: String) {
+    DEFAULT("System"), SERIF("Serif"), MONOSPACE("Monospace")
+}
 
 data class UserSettings(
     val lowBandwidth: Boolean = false,
@@ -13,7 +23,9 @@ data class UserSettings(
     val animeMode: AnimeStreamMode = AnimeStreamMode.ALL,
     val addonUrls: List<String> = emptyList(),
     val extensionRepositories: List<String> = emptyList(),
-    val openRouterModel: String = "openai/gpt-4o-mini",
+    val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
+    val themePreset: ThemePreset = ThemePreset.MUTINY,
+    val themeFont: ThemeFont = ThemeFont.DEFAULT,
 ) {
     val targetKbps: Int get() = videoKbps + audioKbps
 }
@@ -25,6 +37,9 @@ data class MediaItem(
     val poster: String? = null,
     val description: String? = null,
     val isAnime: Boolean = false,
+    val genres: List<String> = emptyList(),
+    val year: Int? = null,
+    val cast: List<String> = emptyList(),
 )
 
 data class Addon(
@@ -54,7 +69,6 @@ data class StreamOption(
 
 data class Episode(val id: String, val title: String, val season: Int, val number: Int)
 
-data class InstalledGame(val name: String, val packageName: String)
 data class ChatLine(val fromUser: Boolean, val text: String)
 
 object StreamFilters {

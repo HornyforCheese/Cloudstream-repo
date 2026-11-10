@@ -21,7 +21,7 @@ private fun AccountState(state: AccountStatus) {
         state.connected -> "Signed in as ${state.email}"
         state.saved -> "Saved sign-in needs verification"
         else -> "Not signed in"
-    }, color=if(state.connected) Mint else MutedInk)
+    }, color=if(state.connected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
     state.error?.let { Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
 }
 
@@ -50,7 +50,7 @@ fun StremioAccountCard(vm: MutinyViewModel) {
             TextButton(onClick={useToken=!useToken;password="";token=""},enabled=enabled) { Text(if(useToken) "Use email and password" else "Use an auth key instead") }
         } else {
             Button(onClick={vm.syncStremio()},enabled=enabled) { Text("Import Stremio addons & library") }
-            Text("Imports merge with your local library. They do not upload, replace or delete your cloud collection.",style=MaterialTheme.typography.bodySmall,color=MutedInk)
+            Text("Imports merge with your local library. They do not upload, replace or delete your cloud collection.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if(state.saved && !state.connected) OutlinedButton(onClick={vm.verifyStremio()},enabled=enabled) { Text("Verify saved Stremio sign-in") }
         if(state.saved || state.connected) OutlinedButton(onClick={vm.logoutStremio()},enabled=enabled) { Text("Sign out of Stremio") }
@@ -89,7 +89,7 @@ fun NuvioAccountCard(vm: MutinyViewModel) {
                 Text("Active profile: ${profiles.firstOrNull { it.index==selected }?.name ?: selected}",style=MaterialTheme.typography.bodySmall)
             }
             Button(onClick={vm.syncNuvio()},enabled=enabled) { Text("Import Nuvio addons & watchlist") }
-            Text("The adapter is included in this app. Imported HTTPS addons feed Browse and playback. Account import does not run Nuvio's executable JS plugins or overwrite cloud data.",style=MaterialTheme.typography.bodySmall,color=MutedInk)
+            Text("The adapter is included in this app. Imported HTTPS addons feed Browse and playback. Account import does not run Nuvio's executable JS plugins or overwrite cloud data.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if(state.saved) OutlinedButton(onClick={vm.verifyNuvio()},enabled=enabled) { Text("Refresh Nuvio account / profiles") }
         if(state.saved || state.connected) OutlinedButton(onClick={vm.logoutNuvio()},enabled=enabled) { Text("Sign out of Nuvio") }
