@@ -416,9 +416,12 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun playViaRealDebrid(stream: StreamOption) = runJob {
         val token = secrets.readSecret("debrid_real_debrid") ?: error("Add a Real-Debrid key under Settings → Integrations → Debrid Services")
-        val link = stream.url ?: error("This stream does not provide a supported hoster link")
-        val direct = realDebrid.resolve(token, link)
-        activeStream.value = stream.copy(url = direct, provider = "Real-Debrid")
+        val direct = when {
+            stream.hasTorrent -> realDebrid.resolveTorrent(token, requireNotNull(stream.infoHash), stream.fileIndex)
+            stream.playable -> realDebrid.resolve(token, requireNotNull(stream.url))
+            else -> error("This source has no supported HTTPS link or torrent hash")
+        }
+        activeStream.value = stream.copy(url = direct, provider = "Real-Debrid", infoHash = null, fileIndex = null)
     }
     fun play(stream: StreamOption) {
         if (!stream.playable) { message.value = "This source requires a torrent/debrid engine that is not integrated yet"; return }
