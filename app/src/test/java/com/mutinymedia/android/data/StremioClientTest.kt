@@ -82,6 +82,20 @@ class StremioClientTest {
         assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("catalog endpoints failed"))
     }
 
+    @Test fun catalogDoesNotTruncateAfterFortyTitles() = runBlocking {
+        val metas = (1..60).joinToString(",") { i ->
+            """{"id":"tt$i","name":"Movie $i","poster":"javascript:bad"}"""
+        }
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json"))
+                """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"""
+            else """{"metas":[$metas]}""")
+        }
+        val titles = client.catalog(client.inspectAddon("https://example.org"))
+        assertEquals(60, titles.size)
+        assertTrue(titles.all { it.poster == null })
+    }
+
     @Test fun normalizesCinemetaAndStremioScheme() {
         val client = StremioClient()
         assertEquals("https://v3-cinemeta.strem.io", client.normalizeBase("https://v3-cinemeta.strem.io/manifest.json"))
