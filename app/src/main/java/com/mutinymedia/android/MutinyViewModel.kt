@@ -63,12 +63,24 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     private val providerSlots = Semaphore(4)
     private suspend fun <T> queryProviders(block: suspend (Addon) -> List<T>): List<T> = coroutineScope {
         val providers = addons.value
-        val results = providers.map { addon -> async {
-            providerSlots.withPermit { providerResult { block(addon) } }
+        val checks = providers.map { addon -> async {
+            providerSlots.withPermit {
+                try { block(addon) to null }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { null to addonFailure(addon.baseUrl, e) }
+            }
         } }.awaitAll()
-        if (results.isNotEmpty() && results.all { it == null }) error("All connected providers failed. Check your connection and addon configuration.")
-        if (results.any { it == null }) message.value = "Some providers failed; showing available results"
-        results.filterNotNull().flatten()
+        val failures = checks.mapNotNull { it.second }
+        if (providers.isNotEmpty() && failures.size == providers.size) {
+            error("All ${providers.size} providers failed: " + failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else ""))
+        }
+        if (failures.isNotEmpty()) {
+            message.value = "${providers.size - failures.size}/${providers.size} providers succeeded. " +
+                failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else "")
+        }
+        checks.mapNotNull { it.first }.flatten()
     }
 
     private suspend fun <T> providerResult(block: suspend () -> T): T? =
