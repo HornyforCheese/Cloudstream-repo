@@ -41,14 +41,14 @@ object Network {
                 connection.readTimeout = 16_000
                 connection.instanceFollowRedirects = false
                 connection.setRequestProperty("Accept", "application/json")
-                connection.setRequestProperty("User-Agent", "MutinyMediaAndroid/0.2")
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) MutinyMedia/1.0")
                 val code = connection.responseCode
                 if (code in listOf(301, 302, 303, 307, 308)) {
                     require(attempt < 5) { "Too many provider redirects" }
                     val location = connection.getHeaderField("Location") ?: error("Provider redirect has no destination")
                     target = validateHttps(URL(URL(target), location).toString())
                 } else {
-                    require(code in 200..299) { "Provider returned HTTP $code" }
+                    require(code in 200..299) { "Provider returned HTTP $code from ${URL(target).host} (${URL(target).path})" }
                     return@withContext readLimited(connection.inputStream, limitBytes)
                 }
             } finally { connection.disconnect() }
