@@ -202,6 +202,27 @@ class RuntimeSmokeTest {
         rule.onNodeWithText("Filters").assertExists()
     }
 
+    private fun assertHttpsPlayback(url: String,label: String) {
+        val vm=model()
+        rule.runOnIdle { vm.play(StreamOption("https-$label", "$label HTTPS fixture",url,"Public test media")) }
+        lateinit var active: Player
+        rule.waitUntil(120_000) {
+            var found=false
+            rule.activityRule.scenario.onActivity { activity -> playerView(activity.window.decorView)?.player?.let { active=it;found=true } }
+            found
+        }
+        rule.waitUntil(180_000) {
+            var playing=false
+            rule.activityRule.scenario.onActivity {
+                active.playerError?.let { throw AssertionError("$label playback failed: ${it.errorCodeName}",it) }
+                playing=active.isPlaying && active.currentPosition>0
+            }
+            playing
+        }
+        screenshot("https-$label")
+        rule.onNodeWithText("Close").performClick()
+    }
+
     @Test fun test06_publicStremioManifestCatalogAndEpisodes() = runBlocking {
         val client=com.mutinymedia.android.data.StremioClient()
         val addon=client.inspectAddon("https://v3-cinemeta.strem.io/manifest.json")
