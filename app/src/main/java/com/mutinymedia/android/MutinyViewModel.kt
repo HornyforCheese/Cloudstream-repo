@@ -74,19 +74,41 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun <T> providerResult(block: suspend () -> T): T? =
         try { block() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
 
+    /** Diagnostic contains only a hostname, never configured paths or credentials. */
+    private fun addonFailure(url: String, error: Exception): String {
+        val host = runCatching { java.net.URI(url.replace(Regex("^stremio://", RegexOption.IGNORE_CASE), "https://")).host }
+            .getOrNull()?.take(80) ?: "invalid URL"
+        val reason = when (error) {
+            is java.net.SocketTimeoutException -> "timeout"
+            is java.net.UnknownHostException -> "DNS lookup failed"
+            is javax.net.ssl.SSLException -> "TLS error"
+            is java.net.ConnectException -> "connection refused"
+            is IllegalArgumentException -> "invalid URL or manifest"
+            else -> "request failed (" + error.javaClass.simpleName + ")"
+        }
+        return "$host: $reason"
+    }
+
     init {
         viewModelScope.launch {
             store.settings.map { it.addonUrls }.distinctUntilChanged().collectLatest { urls ->
-                val result = coroutineScope {
-                    urls.map { url -> async { providerSlots.withPermit { providerResult { stremio.inspectAddon(url) } } } }
-                        .awaitAll().filterNotNull()
+                val checks = coroutineScope {
+                    urls.map { url -> async {
+                        providerSlots.withPermit {
+                            try { stremio.inspectAddon(url) to null }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { null to addonFailure(url, e) }
+                        }
+                    } }.awaitAll()
                 }
+                val result = checks.mapNotNull { it.first }
+                val failures = checks.mapNotNull { it.second }
                 if (addons.value.map { it.baseUrl } != result.map { it.baseUrl }) {
                     catalog.value = emptyList()
                     catalogSearch.value = null
                 }
                 addons.value = result
-                if (urls.size > result.size) message.value = "Some saved Stremio addons are unreachable"
+                if (failures.isNotEmpty()) message.value = "Stremio: ${result.size}/${urls.size} addons loaded. " + failures.take(3).joinToString("; ") + if (failures.size > 3) "; +${failures.size - 3} more failed" else ""
             }
         }
         viewModelScope.launch { accounts.restoreStremio() }
@@ -131,9 +153,18 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         message.value = "Added ${addon.title}"
     }
     fun refreshAddons() = runJob {
-        val result = settings.value.addonUrls.mapNotNull { url -> providerResult { stremio.inspectAddon(url) } }
+        val urls = settings.value.addonUrls
+        val checks = urls.map { url ->
+            try { stremio.inspectAddon(url) to null }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { null to addonFailure(url, e) }
+        }
+        val result = checks.mapNotNull { it.first }
+        val failures = checks.mapNotNull { it.second }
         addons.value = result
-        message.value = "Verified ${result.size} of ${settings.value.addonUrls.size} saved addons"
+        message.value = "Verified ${result.size}/${urls.size} saved addons" +
+            if (failures.isNotEmpty()) ". " + failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else "") else ""
     }
     fun removeAddon(url: String) = runJob { store.removeAddon(url); message.value = "Addon removed" }
     fun addExtensionRepo(url: String) = runJob {
