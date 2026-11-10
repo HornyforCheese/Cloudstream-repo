@@ -44,6 +44,9 @@ data class MediaItem(
     val genres: List<String> = emptyList(),
     val year: Int? = null,
     val cast: List<String> = emptyList(),
+    val rating: Double? = null,
+    val releaseDate: java.time.LocalDate? = null,
+    val catalogFormat: String? = null,
 )
 
 data class MediaCollection(val name: String, val titles: List<MediaItem> = emptyList())

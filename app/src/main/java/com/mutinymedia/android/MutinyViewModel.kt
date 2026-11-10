@@ -7,6 +7,7 @@ import com.mutinymedia.android.data.AccountRepository
 import com.mutinymedia.android.data.AccountImport
 import com.mutinymedia.android.data.AndroidServices
 import android.content.Context
+import android.os.SystemClock
 import com.mutinymedia.android.data.CloudStreamHost
 import com.mutinymedia.android.data.CloudStreamInstaller
 import com.mutinymedia.android.data.CloudStreamPlugin
@@ -55,6 +56,15 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val watchlist: StateFlow<List<MediaItem>> = store.watchlist.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val collections = store.collections.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val catalog = MutableStateFlow<List<MediaItem>>(emptyList())
+    val homeCatalogLoading = MutableStateFlow(false)
+    private val catalogMutex = Mutex()
+    private var lastCatalogInputs: CatalogInputs? = null
+    private var lastCatalogLoadMs = 0L
+
+    private data class CatalogInputs(
+        val addons: List<String>,
+        val extensions: List<Pair<String, Int>>,
+    )
     val episodes = MutableStateFlow<List<Episode>>(emptyList())
     val selectedEpisode = MutableStateFlow<String?>(null)
     val streams = MutableStateFlow<List<StreamOption>>(emptyList())
@@ -318,8 +328,33 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         message.value = "Discovered ${cloudStreamPlugins.value.size} CloudStream plugins" +
             if (failures.isNotEmpty()) " (${failures.size} repositories failed)" else ""
     }
+    suspend fun refreshHomeCatalogs(force: Boolean = false) = catalogMutex.withLock {
+        val inputs = CatalogInputs(
+            enabledAddons().filter { it.supportsCatalog }.map { it.baseUrl },
+            cloudHostStatuses.value.filter { it.supportsCatalog }.map { it.packageId to it.version },
+        )
+        if (inputs.addons.isEmpty() && inputs.extensions.isEmpty()) {
+            lastCatalogInputs = null
+            catalog.value = emptyList()
+            return@withLock
+        }
+        val now = SystemClock.elapsedRealtime()
+        val unchanged = inputs == lastCatalogInputs
+        if (!force && unchanged && catalog.value.isNotEmpty() && now - lastCatalogLoadMs < 15 * 60_000) return@withLock
+        if (!unchanged) catalog.value = emptyList()
+        homeCatalogLoading.value = true
+        try {
+            val loaded = loadProviderCatalogs()
+            if (loaded.isNotEmpty() || !unchanged) catalog.value = loaded
+            lastCatalogInputs = inputs
+            lastCatalogLoadMs = SystemClock.elapsedRealtime()
+        } finally {
+            homeCatalogLoading.value = false
+        }
+    }
+
     fun browseCatalogs() = runJob {
-        catalog.value = loadProviderCatalogs()
+        refreshHomeCatalogs(force = true)
         if (catalog.value.isEmpty()) message.value = "No titles found in your configured catalogs."
     }
 
@@ -328,7 +363,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         val stremio = async { providerResult { queryProviders { addon -> this@MutinyViewModel.stremio.catalog(addon) } }.orEmpty() }
         val results = cloud.await()
         showCloudWarnings(results)
-        (stremio.await() + results.items).distinctBy { it.type to it.id }
+        mergeCatalogTitles(stremio.await() + results.items)
     }
 
     private fun showCloudWarnings(results: CloudStreamProviderClient.Titles) {
@@ -339,7 +374,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun savedCatalogItems(): List<MediaItem> {
         if (catalog.value.isEmpty() && (enabledAddons().any { it.supportsCatalog } || cloudHostStatuses.value.any { it.supportsCatalog })) {
-            catalog.value = loadProviderCatalogs()
+            refreshHomeCatalogs()
         }
         return (catalog.value + watchlist.value).distinctBy { it.type to it.id }
     }
@@ -427,6 +462,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                 genres = enrichedItem.genres.ifEmpty { candidate.genres },
                 year = enrichedItem.year ?: candidate.year,
                 cast = enrichedItem.cast.ifEmpty { candidate.cast },
+                rating = enrichedItem.rating ?: candidate.rating,
+                releaseDate = enrichedItem.releaseDate ?: candidate.releaseDate,
             )
         }
         currentItem.value = enrichedItem

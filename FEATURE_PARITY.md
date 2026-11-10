@@ -6,6 +6,7 @@
 | Stremio | HTTPS manifests, catalogs, metadata, episodes, streams, account import, persistent addon priority and exclusion | Verify live accounts and provider combinations on a device |
 | Nuvio | Server discovery, sign-in, profile selection and import of compatible addons and saved titles | Native Nuvio extension execution |
 | CloudStream | v4.5.4 provider ABI, extension loading, provider catalogs, search, episodes and stream extraction | Validate trusted third-party extensions on a physical device |
+| Home catalogs | Automatic poster shelves for 2026, new releases, anime films and series, and genres from enabled catalogs | Shelf coverage depends on provider dates, ratings, and catalog metadata |
 | Search | Combined provider results and deduplication by exact type and ID, plus OpenRouter search over saved catalogs | Cross-provider matching for different title IDs |
 | Stream selection | Exact source resolution, bandwidth and codec preferences, automatic HTTPS fallback | Resolution and bitrate guarantees require accurate source metadata and suitable provider tracks |
 | Anime | English dub, sub-labelled sources, dual audio and uncensored/uncut filters | Independent verification of provider labels |

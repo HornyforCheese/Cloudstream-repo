@@ -139,4 +139,19 @@ class StremioClientTest {
         val client = StremioClient { _, _ -> JSONObject("{}") }
         assertTrue(runCatching { client.inspectAddon("https://example.org") }.isFailure)
     }
+    @Test fun capturesCatalogRatingReleaseDateAndAnimeFormat() = runBlocking {
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json"))
+                """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[{"type":"anime","id":"films"}]}"""
+            else """{"metas":[{"id":"kitsu:fixture","name":"Film","type":"movie","poster":"https://example.org/poster.jpg","released":"2026-08-20T00:00:00Z","imdbRating":"8.7","genres":["Fantasy"]}]}""")
+        }
+        val item = client.catalog(client.inspectAddon("https://example.org")).single()
+        assertEquals("anime", item.type)
+        assertEquals("movie", item.catalogFormat)
+        assertEquals(2026, item.year)
+        assertEquals(java.time.LocalDate.of(2026, 8, 20), item.releaseDate)
+        assertEquals(8.7, requireNotNull(item.rating), 0.0001)
+        assertEquals("https://example.org/poster.jpg", item.poster)
+        assertTrue(item.isAnime)
+    }
 }

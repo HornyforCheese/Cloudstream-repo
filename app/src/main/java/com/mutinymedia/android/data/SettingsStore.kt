@@ -176,6 +176,9 @@ class SettingsStore(private val context: Context) {
                 genres = parseStringList(o.optJSONArray("genres")?.toString()),
                 year = o.optInt("year").takeIf { it in 1800..2099 },
                 cast = parseStringList(o.optJSONArray("cast")?.toString()),
+                rating = o.optDouble("rating", Double.NaN).takeIf { it.isFinite() && it > 0 && it <= 10 },
+                releaseDate = runCatching { java.time.LocalDate.parse(o.optString("released")) }.getOrNull(),
+                catalogFormat = o.optString("catalogFormat").takeIf { it in setOf("movie", "series") },
             )
         }
     }.getOrDefault(emptyList())
@@ -183,7 +186,8 @@ class SettingsStore(private val context: Context) {
         items.forEach { item -> put(JSONObject().put("id", item.id).put("type", item.type)
             .put("title", item.title).put("poster", item.poster ?: "")
             .put("description", item.description ?: "").put("anime", item.isAnime)
-            .put("genres", JSONArray(item.genres)).put("year", item.year).put("cast", JSONArray(item.cast))) }
+            .put("genres", JSONArray(item.genres)).put("year", item.year).put("cast", JSONArray(item.cast))
+            .put("rating", item.rating).put("released", item.releaseDate?.toString()).put("catalogFormat", item.catalogFormat)) }
     }.toString()
 
     suspend fun setThemePreset(value: ThemePreset) {

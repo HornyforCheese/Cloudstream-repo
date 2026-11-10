@@ -1,6 +1,9 @@
 package com.mutinymedia.android.data
 
 import com.lagradost.cloudstream3.AnimeLoadResponse
+import com.lagradost.cloudstream3.AnimeSearchResponse
+import com.lagradost.cloudstream3.MovieSearchResponse
+import com.lagradost.cloudstream3.TvSeriesSearchResponse
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.LiveStreamLoadResponse
 import com.lagradost.cloudstream3.MainAPI
@@ -75,6 +78,7 @@ internal class CloudStreamProviderClient(private val host: CloudStreamHost) {
             genres = load.tags.orEmpty(),
             year = load.year,
             cast = load.actors.orEmpty().map { it.actor.name },
+            rating = load.score?.toDouble()?.takeIf { it > 0 } ?: item.rating,
         )
         val parts = when (load) {
             is AnimeLoadResponse -> load.episodes.flatMap { (dub, episodes) -> episodes.map { it to dub } }
@@ -161,7 +165,17 @@ internal class CloudStreamProviderClient(private val host: CloudStreamHost) {
             if (tvType.isMovieType()) "movie" else "series",
             posterUrl?.let(::https),
         )
-        return CloudStreamSearchAdapter.convert(listOf(result)).firstOrNull()?.copy(isAnime = tvType.isAnime())
+        val releaseYear = when (this) {
+            is AnimeSearchResponse -> year
+            is MovieSearchResponse -> year
+            is TvSeriesSearchResponse -> year
+            else -> null
+        }
+        return CloudStreamSearchAdapter.convert(listOf(result)).firstOrNull()?.copy(
+            isAnime = tvType.isAnime(),
+            year = releaseYear?.takeIf { it in 1800..2099 },
+            rating = score?.toDouble()?.takeIf { it > 0 },
+        )
     }
 
     private fun TvType.isAnime() = this in setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)

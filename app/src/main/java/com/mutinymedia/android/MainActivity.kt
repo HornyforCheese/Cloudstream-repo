@@ -57,6 +57,8 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val addons by vm.addons.collectAsStateWithLifecycle()
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val catalogLoading by vm.homeCatalogLoading.collectAsStateWithLifecycle()
+    val cloudStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
     val availableStreams by vm.streams.collectAsStateWithLifecycle()
@@ -149,16 +151,22 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                     when {
                         showTitleDetails -> BrowseScreen(vm, settings, addons, detailOnly = true, onBack = { showTitleDetails = false })
                         showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; showTitleDetails = true })
-                        section == Section.HOME -> HomeScreen(
-                            watchlist = watchlist,
-                            catalog = catalog,
-                            onBrowse = { section = Section.BROWSE },
-                            onSearch = { section = Section.SEARCH },
-                            onSettings = { section = Section.SETTINGS },
-                            onAI = { section = Section.AI },
-                            onLibrary = { showLibrary = true },
-                            onSelectTitle = { showTitleDetails = true; vm.loadStreams(it) },
-                        )
+                        section == Section.HOME -> {
+                            LaunchedEffect(addons, settings.addonUrls, settings.excludedAddonUrls, cloudStatuses) {
+                                vm.refreshHomeCatalogs()
+                            }
+                            HomeScreen(
+                                watchlist = watchlist,
+                                catalog = catalog,
+                                loading = catalogLoading,
+                                onRefresh = { vm.browseCatalogs() },
+                                onSearch = { section = Section.SEARCH },
+                                onSettings = { section = Section.SETTINGS },
+                                onAI = { section = Section.AI },
+                                onLibrary = { showLibrary = true },
+                                onSelectTitle = { showTitleDetails = true; vm.loadStreams(it) },
+                            )
+                        }
                         section == Section.BROWSE -> BrowseScreen(vm, settings, addons)
                         section == Section.SEARCH -> searchState.SaveableStateProvider("catalog-search") {
                             SearchScreen(vm) { item ->
