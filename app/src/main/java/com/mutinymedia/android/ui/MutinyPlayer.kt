@@ -27,7 +27,7 @@ import com.mutinymedia.android.domain.UserSettings
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Unit) {
+fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Unit, onPlaybackFailure: (StreamOption) -> Unit = {}) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var savedPosition by rememberSaveable(stream.url) { mutableLongStateOf(0L) }
@@ -96,10 +96,12 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
             delay(1500)
         }
     }
+    val latestFailureHandler by rememberUpdatedState(onPlaybackFailure)
     DisposableEffect(player) {
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                playbackError = "Playback failed: ${error.errorCodeName}. Try another source."
+                playbackError = "Playback failed: ${error.errorCodeName}. Trying another source if available."
+                latestFailureHandler(stream)
             }
         }
         player.addListener(listener)
