@@ -65,7 +65,7 @@ class StremioClient(
                 val name = m.optString("name")
                 if (mediaId.isBlank() || name.isBlank()) continue
                 all += MediaItem(mediaId, type, name,
-                    m.optString("poster").takeIf(String::isNotBlank),
+                    m.optString("poster").takeIf { it.startsWith("https://", ignoreCase = true) },
                     m.optString("description").takeIf(String::isNotBlank),
                     type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"),
                     genres = m.catalogGenres(),
