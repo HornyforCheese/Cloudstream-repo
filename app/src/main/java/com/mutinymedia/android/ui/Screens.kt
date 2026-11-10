@@ -158,7 +158,7 @@ private fun PosterShelf(title: String, items: List<MediaItem>, onSelectTitle: (M
 }
 
 @Composable
-fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon>) {
+fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon>, detailOnly: Boolean = false, onBack: () -> Unit = {}) {
     val context = LocalContext.current
     val catalog by vm.catalog.collectAsStateWithLifecycle()
     val episodes by vm.episodes.collectAsStateWithLifecycle()
@@ -171,6 +171,10 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
     var anime by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (detailOnly) {
+            TextButton(onClick = onBack) { Text("‹ Back to titles") }
+            PanelTitle(current?.title ?: "Loading title…", "Episodes and available sources")
+        } else {
         PanelTitle("Discover & play", "Find streams using installed Stremio addons or a direct media ID.")
         if (addons.isEmpty()) Text("No Stremio addons connected. Open Settings → Integrations to add a provider.", color = MaterialTheme.colorScheme.error)
         MutinyPanel("Provider catalogs") {
@@ -194,6 +198,7 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
             }
             Button(onClick = { vm.lookup(type, directId, anime || directId.startsWith("kitsu:") || directId.startsWith("mal:")) },
                 enabled = !busy && directId.isNotBlank() && addons.isNotEmpty()) { Text("Find available streams") }
+        }
         }
         if (current != null) {
             MutinyPanel("Title details") {
