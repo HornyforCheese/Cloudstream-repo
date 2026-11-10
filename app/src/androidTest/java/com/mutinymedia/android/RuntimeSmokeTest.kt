@@ -102,10 +102,10 @@ class RuntimeSmokeTest {
         rule.onNodeWithText("Library").performClick()
         rule.onNodeWithText(item.title).assertExists()
         rule.onNodeWithText("Find streams").performScrollTo().performClick()
-        rule.onNodeWithText("Discover & play").assertExists()
+        rule.onNodeWithText("Title details").assertExists()
         rule.waitUntil(60_000) { vm.currentItem.value?.id == item.id && !vm.busy.value }
         rule.activityRule.scenario.recreate()
-        rule.onNodeWithText("Discover & play").assertExists()
+        rule.onNodeWithText("Title details").assertExists()
         assertTrue(runBlocking { SettingsStore(target).watchlist.first() }.any { it.id == item.id })
         nav("Ask AI")
         rule.onNode(hasSetTextAction()).performTextInput("Recommend a film")
