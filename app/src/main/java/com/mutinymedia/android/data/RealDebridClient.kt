@@ -27,7 +27,7 @@ class RealDebridClient {
             val code = connection.responseCode
             val body = (if (code in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) throw IllegalStateException("Real-Debrid returned HTTP $code: " + JSONObject(body.takeIf { it.startsWith("{") } ?: "{}").optString("error", "Check your token or link"))
-            JSONObject(body)
+            if (body.isBlank()) JSONObject() else JSONObject(body)
         } finally { connection.disconnect() }
     }
 
