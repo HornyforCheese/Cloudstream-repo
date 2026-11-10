@@ -120,8 +120,11 @@ class StremioClient(
                 val value = requestHeaders.optString(key)
                 if (key.contains('\r') || key.contains('\n') || value.contains('\r') || value.contains('\n')) null else key to value
             }?.toMap().orEmpty()
+            val infoHash = stream.optString("infoHash").trim().takeIf { it.matches(Regex("[a-fA-F0-9]{40}")) }
+            val fileIndex = stream.optInt("fileIdx", -1).takeIf { it >= 0 }
             StreamOption("${addon.id}#$i", title.ifBlank { "Stream ${i+1}" },
-                stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers, stream.optString("externalUrl").takeIf { it.startsWith("https://", true) })
+                stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers,
+                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex)
         }
     }
 }
