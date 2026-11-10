@@ -46,7 +46,7 @@ class StremioClient(
         val specs = manifest.optJSONArray("catalogs") ?: return emptyList()
         val all = mutableListOf<MediaItem>()
         val failures = mutableListOf<Exception>()
-        for (index in 0 until minOf(specs.length(), 30)) {
+        for (index in 0 until minOf(specs.length(), 100)) {
             val spec = specs.optJSONObject(index) ?: continue
             val type = spec.optString("type")
             val id = spec.optString("id")
@@ -59,7 +59,7 @@ class StremioClient(
             val slug = if (query.isNullOrBlank()) "" else "/search=${encode(query.trim())}"
             val data = try { fetch("${addon.baseUrl}/catalog/${encode(type)}/${encode(id)}$slug.json") } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e; continue }
             val metas = data.optJSONArray("metas") ?: continue
-            for (j in 0 until minOf(metas.length(), 40)) {
+            for (j in 0 until minOf(metas.length(), 100)) {
                 val m = metas.optJSONObject(j) ?: continue
                 val mediaId = m.optString("id")
                 val name = m.optString("name")
@@ -75,7 +75,7 @@ class StremioClient(
             }
         }
         if (failures.isNotEmpty() && all.isEmpty()) throw IllegalStateException("All ${failures.size} catalog endpoints failed", failures.first())
-        return all.distinctBy { it.type to it.id }.take(300)
+        return all.distinctBy { it.type to it.id }.take(1_000)
     }
     /** Fetches full title metadata from an addon without discarding existing poster/description. */
     suspend fun metadata(addon: Addon, media: MediaItem): MediaItem {
@@ -97,7 +97,7 @@ class StremioClient(
         if (!addon.supportsMeta) return emptyList()
         val data = fetch("${addon.baseUrl}/meta/${encode(media.type)}/${encode(media.id)}.json")
         val videos = data.optJSONObject("meta")?.optJSONArray("videos") ?: return emptyList()
-        return (0 until minOf(videos.length(), 2000)).mapNotNull { index ->
+        return (0 until minOf(videos.length(), 5_000)).mapNotNull { index ->
             val video = videos.optJSONObject(index) ?: return@mapNotNull null
             val id = video.optString("id").takeIf(String::isNotBlank) ?: return@mapNotNull null
             Episode(id, video.optString("title").ifBlank { video.optString("name", id) },
@@ -110,7 +110,7 @@ class StremioClient(
         require(type in listOf("movie", "series", "anime")) { "Unsupported media type" }
         val data = fetch("${addon.baseUrl}/stream/${encode(type)}/${encode(id)}.json", 3_000_000)
         val entries = data.optJSONArray("streams") ?: return emptyList()
-        return (0 until minOf(entries.length(), 120)).mapNotNull { i ->
+        return (0 until minOf(entries.length(), 300)).mapNotNull { i ->
             val stream = entries.optJSONObject(i) ?: return@mapNotNull null
             val title = listOf(stream.optString("name"), stream.optString("title")).filter(String::isNotBlank).joinToString(" · ")
             val fileName = stream.optJSONObject("behaviorHints")?.optString("filename")
