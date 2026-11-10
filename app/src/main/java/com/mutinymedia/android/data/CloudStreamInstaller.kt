@@ -75,6 +75,7 @@ class CloudStreamInstaller(private val context: Context) {
                     "Invalid CloudStream plugin class name"
                 }
             }
+            require(temp.setReadOnly()) { "Could not secure extension bytecode as read-only" }
             require(temp.renameTo(destination)) { "Could not save extension package" }
             id
         } finally { temp.delete() }
