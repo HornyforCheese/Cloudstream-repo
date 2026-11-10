@@ -338,7 +338,10 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
             currentItem.value = enriched
             if (enriched.poster != null && enriched.description != null && enriched.title != media.id) break
         }
-        if (addons.value.isEmpty()) error("Install a Stremio addon first")
+        if (addons.value.none { it.supportsStreams }) {
+            message.value = "No stream-capable Stremio addon is connected. Add or refresh a streaming provider in Settings → Integrations."
+            return
+        }
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
             val metadataSources = addons.value.filter { it.supportsMeta } +
                 com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
@@ -348,6 +351,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                 message.value = "Select an episode to find streams"
                 return
             }
+            message.value = "No episodes were returned for this series. Check the metadata provider or try another title."
+            return
         }
         fetchStreams(media)
     }
@@ -360,10 +365,15 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchStreams(media: MediaItem) {
         val found = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
             .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
-        val filtered = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
-        streams.value = StreamFilters.rankForBandwidth(filtered, settings.value)
-        if (found.isNotEmpty() && filtered.isEmpty()) message.value = "No streams match the selected anime language filter"
-        if (streams.value.isEmpty()) message.value = listOfNotNull("No playable results from connected providers", providerWarnings.value).joinToString(". ")
+        // Keep raw provider results so the UI can change language and bandwidth filters without another request.
+        streams.value = found
+        val matched = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
+        message.value = when {
+            found.isEmpty() -> listOfNotNull("No streams returned by connected providers", providerWarnings.value).joinToString(". ")
+            matched.isEmpty() -> "No streams match the selected anime language filter. Switch to All in Settings → Anime."
+            found.none { it.playable } -> "Sources were found, but none is a directly playable HTTPS stream. Torrent playback is not supported yet."
+            else -> providerWarnings.value
+        }
     }
     fun saveRealDebridKey(token: String) = runJob {
         if (token.isBlank()) {
