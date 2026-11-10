@@ -59,11 +59,14 @@ data class StreamOption(
     val fileName: String? = null,
     val headers: Map<String, String> = emptyMap(),
     val externalUrl: String? = null,
+    val infoHash: String? = null,
+    val fileIndex: Int? = null,
 ) {
     val playable: Boolean get() = runCatching {
         val uri = java.net.URI(url ?: return false)
         uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null
     }.getOrDefault(false)
+    val hasTorrent: Boolean get() = infoHash?.matches(Regex("[a-fA-F0-9]{40}")) == true
     val metadata: String get() = listOfNotNull(title, fileName).joinToString(" ")
 }
 
