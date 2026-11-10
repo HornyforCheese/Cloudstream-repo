@@ -25,7 +25,7 @@ class CloudStreamInstaller(private val context: Context) {
                     if (dex.size == 0L) return@use
                     val data = zip.getInputStream(manifest).use { JSONObject(Network.readLimited(it, 65_536)) }
                     val className = data.optString("pluginClassName")
-                    if (className.isNotBlank()) put(file.nameWithoutExtension, className)
+                    if (className.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+"))) put(file.nameWithoutExtension, className)
                 }
             }
         }
@@ -68,8 +68,11 @@ class CloudStreamInstaller(private val context: Context) {
                 require(data.optString("pluginClassName").isNotBlank()) {
                     "CloudStream extension manifest has no pluginClassName"
                 }
-                require(zip.getEntry("classes.dex") != null) {
-                    "CloudStream extension has no executable classes.dex"
+                require(zip.getEntry("classes.dex")?.size != 0L) {
+                    "CloudStream extension has no nonempty classes.dex"
+                }
+                require(data.optString("pluginClassName").matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+"))) {
+                    "Invalid CloudStream plugin class name"
                 }
             }
             require(temp.renameTo(destination)) { "Could not save extension package" }
