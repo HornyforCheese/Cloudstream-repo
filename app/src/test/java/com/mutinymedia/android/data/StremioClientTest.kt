@@ -71,6 +71,17 @@ class StremioClientTest {
         assertEquals(initial, client.metadata(addon, initial))
     }
 
+    @Test fun reportsCatalogEndpointFailureWhenNothingCanBeLoaded() = runBlocking {
+        val client = StremioClient { url, _ ->
+            if (url.endsWith("manifest.json")) JSONObject(manifest)
+            else throw java.net.SocketTimeoutException("simulated timeout")
+        }
+        val addon = client.inspectAddon("https://example.org")
+        val result = runCatching { client.catalog(addon, "test") }
+        assertTrue("Catalog failure must be reported", result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("catalog endpoints failed"))
+    }
+
     @Test fun normalizesCinemetaAndStremioScheme() {
         val client = StremioClient()
         assertEquals("https://v3-cinemeta.strem.io", client.normalizeBase("https://v3-cinemeta.strem.io/manifest.json"))
