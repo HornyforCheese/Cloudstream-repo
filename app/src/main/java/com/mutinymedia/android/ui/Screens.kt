@@ -200,6 +200,13 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                 enabled = !busy && directId.isNotBlank() && addons.isNotEmpty()) { Text("Find available streams") }
         }
         }
+        if (detailOnly && busy) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("Loading title details and provider results…", style = MaterialTheme.typography.bodySmall)
+        }
+        if (detailOnly && current == null && !busy) {
+            Text("No title is selected. Return to Home or Search and choose a title.")
+        }
         if (current != null) {
             MutinyPanel("Title details") {
                 Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -239,6 +246,17 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
             MutinyPanel("Sources for ${current!!.title}") {
                 OutlinedButton(onClick = { vm.saveToWatchlist(current!!) }) { Text("Save title to watchlist") }
                 Text("${streams.size} sources returned • ${ranked.size} matched", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!busy && streams.isEmpty()) {
+                    Text(
+                        if (episodes.isNotEmpty() && selectedEpisode == null) "Select an episode above to search for streams."
+                        else if (episodes.isEmpty() && current!!.type in listOf("series", "anime")) "No episode list available. Try a different metadata provider or title."
+                        else "No streams returned. Check your streaming add-ons under Settings → Integrations and try again.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (streams.isNotEmpty() && streams.none { it.playable }) {
+                    Text("Providers returned sources, but none can play directly. Torrent sources require an unsupported engine.", color = MaterialTheme.colorScheme.error)
+                }
                 if (isAnime) Text("Anime language mode: ${settings.animeMode.name}. Change in Settings → Anime.")
                 if (settings.lowBandwidth) Text("Prioritising ≤${settings.resolution}p and ~${settings.videoKbps} kbps when providers supply metadata.", color = MaterialTheme.colorScheme.secondary)
                 if (streams.isNotEmpty() && ranked.isEmpty()) Text("No verified ${settings.animeMode.name.lowercase()} tags. Switch to All in Anime settings to reveal unlabelled streams.", color = MaterialTheme.colorScheme.error)
