@@ -1,7 +1,7 @@
 package com.mutinymedia.android.data
 
 import android.content.Context
-import dalvik.system.PathClassLoader
+import dalvik.system.DexClassLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -35,9 +35,13 @@ class CloudStreamHost(private val context: Context) {
         try {
             val className = ZipFile(file).use { zip ->
                 val entry = zip.getEntry("manifest.json") ?: error("Missing extension manifest")
-                require(zip.getEntry("classes.dex") != null) { "Missing classes.dex" }
+                require(zip.getEntry("classes.dex")?.size != 0L) { "Missing or empty classes.dex" }
                 JSONObject(zip.getInputStream(entry).use { Network.readLimited(it, 65_536) })
-                    .optString("pluginClassName").also { require(it.isNotBlank()) { "Missing plugin class" } }
+                    .optString("pluginClassName").also {
+                        require(it.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+"))) {
+                            "Missing or invalid plugin class name"
+                        }
+                    }
             }
             // Verify host API presence before allowing plugin constructors or load() to execute.
             val hostAvailable = runCatching {
@@ -52,11 +56,13 @@ class CloudStreamHost(private val context: Context) {
             // Loading class metadata does not execute the plugin. Registration must be
             // performed by a compatible host and is not claimed here.
             val loader = synchronized(loaders) {
-                loaders.getOrPut(packageId) { PathClassLoader(file.absolutePath, context.classLoader) }
+                loaders.getOrPut(packageId) {
+                    DexClassLoader(file.absolutePath, context.codeCacheDir.absolutePath, null, context.classLoader)
+                }
             }
             val pluginClass = loader.loadClass(className)
-            ProviderStatus(packageId, className, State.LOADABLE,
-                "Class ${pluginClass.name} resolved. Provider registration still requires host lifecycle integration.")
+            ProviderStatus(packageId, className, State.INCOMPATIBLE,
+                "Class ${pluginClass.name} resolved, but CloudStream plugin lifecycle and provider registration are not implemented.")
         } catch (e: Exception) {
             ProviderStatus(packageId, "", State.FAILED, e.message ?: "Could not inspect extension")
         } catch (e: LinkageError) {
