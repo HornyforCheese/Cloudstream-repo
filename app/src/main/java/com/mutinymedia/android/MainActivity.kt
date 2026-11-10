@@ -49,8 +49,10 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var playing by remember { mutableStateOf(false) }
     var showLibrary by rememberSaveable { mutableStateOf(false) }
-    BackHandler(playing || section != Section.HOME || showLibrary) {
+    var showTitleDetails by rememberSaveable { mutableStateOf(false) }
+    BackHandler(playing || showTitleDetails || section != Section.HOME || showLibrary) {
         if (playing) { playing = false; vm.activeStream.value = null }
+        else if (showTitleDetails) showTitleDetails = false
         else if (showLibrary) showLibrary = false
         else section = Section.HOME
     }
@@ -77,7 +79,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                 if (!expanded) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Section.entries.forEach { s ->
                         NavigationBarItem(selected = section == s && !showLibrary,
-                            onClick = { section = s; showLibrary = false },
+                            onClick = { section = s; showLibrary = false; showTitleDetails = false },
                             icon = { Text(s.glyph, style = MaterialTheme.typography.titleMedium) },
                             label = { Text(s.display, maxLines = 1) })
                     }
@@ -92,7 +94,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                     Spacer(Modifier.height(20.dp))
                     Section.entries.forEach { s ->
                         NavigationRailItem(selected = section == s && !showLibrary,
-                            onClick = { section = s; showLibrary = false },
+                            onClick = { section = s; showLibrary = false; showTitleDetails = false },
                             icon = { Text(s.glyph, style = MaterialTheme.typography.titleLarge) },
                             label = { Text(s.display) })
                     }
@@ -107,7 +109,8 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                         }
                     }
                     when {
-                        showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; section = Section.BROWSE })
+                        showTitleDetails -> BrowseScreen(vm, settings, addons, detailOnly = true, onBack = { showTitleDetails = false })
+                        showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; showTitleDetails = true })
                         section == Section.HOME -> HomeScreen(
                             watchlist = watchlist,
                             catalog = catalog,
@@ -116,13 +119,13 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                             onSettings = { section = Section.SETTINGS },
                             onAI = { section = Section.AI },
                             onLibrary = { showLibrary = true },
-                            onSelectTitle = { vm.loadStreams(it); section = Section.BROWSE },
+                            onSelectTitle = { showTitleDetails = true; vm.loadStreams(it) },
                         )
                         section == Section.BROWSE -> BrowseScreen(vm, settings, addons)
                         section == Section.SEARCH -> searchState.SaveableStateProvider("catalog-search") {
                             SearchScreen(vm) { item ->
+                                showTitleDetails = true
                                 vm.loadStreams(item)
-                                section = Section.BROWSE
                             }
                         }
                         section == Section.AI -> AiScreen(vm, settings)
