@@ -64,21 +64,17 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val selectedEpisode by vm.selectedEpisode.collectAsStateWithLifecycle()
     val isAnime = currentItem?.isAnime == true
     val playableStreams = remember(availableStreams, isAnime, settings) {
-        com.mutinymedia.android.domain.StreamFilters.rankForBandwidth(
-            com.mutinymedia.android.domain.StreamFilters.filterAnime(
-                availableStreams, isAnime, settings.animeMode
-            ), settings
-        ).filter { it.playable }
+        com.mutinymedia.android.domain.StreamFilters.select(availableStreams, isAnime, settings).filter { it.playable }
     }
     var attemptedSources by remember(currentItem?.id, selectedEpisode) { mutableStateOf<Set<String>>(emptySet()) }
-    fun nextSource(failed: com.mutinymedia.android.domain.StreamOption) {
+    fun nextSource(failed: com.mutinymedia.android.domain.StreamOption, positionMs: Long) {
         val attempted = attemptedSources + failed.id
         val next = playableStreams.firstOrNull { it.id !in attempted && it.id != failed.id }
         attemptedSources = attempted
         if (next == null) vm.report("Playback failed. No other playable HTTPS sources remain.")
         else {
             attemptedSources = attempted + next.id
-            vm.activeStream.value = next
+            vm.continuePlayback(next, positionMs)
             vm.report("Trying alternative source: ${next.provider}")
         }
     }
@@ -95,8 +91,12 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     }
     LaunchedEffect(activeStream) { if (activeStream != null) playing = true }
     if (playing && activeStream != null) {
-        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null },
-            onPlaybackFailure = { nextSource(it) })
+        val progressKey = vm.activePlaybackKey
+        MutinyPlayer(activeStream!!, settings,
+            onExit = { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null },
+            initialPositionMs = vm.playbackStartMs,
+            onPosition = { positionMs, durationMs -> vm.recordPlayback(progressKey, positionMs, durationMs) },
+            onPlaybackFailure = { stream, positionMs -> nextSource(stream, positionMs) })
         return
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {

@@ -139,6 +139,7 @@ internal class CloudStreamProviderClient(private val host: CloudStreamHost) {
                     "cloudstream:" + CloudStreamInstaller.digest("$url:$mime:${headers.toSortedMap()}"),
                     name, url, api.name, headers = headers, mimeType = mime,
                     subtitles = subtitleOptions, cloudStreamSession = true,
+                    declaredResolution = link.quality.takeIf { it in com.mutinymedia.android.domain.StreamFilters.resolutions },
                 )
             }.distinctBy { it.id }
         }

@@ -53,12 +53,18 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val settings: StateFlow<UserSettings> = store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings())
     val addons = MutableStateFlow<List<Addon>>(emptyList())
     val watchlist: StateFlow<List<MediaItem>> = store.watchlist.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val collections = store.collections.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val catalog = MutableStateFlow<List<MediaItem>>(emptyList())
     val episodes = MutableStateFlow<List<Episode>>(emptyList())
     val selectedEpisode = MutableStateFlow<String?>(null)
     val streams = MutableStateFlow<List<StreamOption>>(emptyList())
     val currentItem = MutableStateFlow<MediaItem?>(null)
     val activeStream = MutableStateFlow<StreamOption?>(null)
+    val playbackPositions = store.playbackPositions.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    var playbackStartMs = 0L
+        private set
+    var activePlaybackKey: String? = null
+        private set
     val chat = MutableStateFlow<List<ChatLine>>(emptyList())
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
@@ -67,8 +73,15 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     private val operationMutex = Mutex()
     private val providerSlots = Semaphore(4)
     private val providerWarnings = MutableStateFlow<String?>(null)
+    private fun enabledAddons(): List<Addon> {
+        val preferences = settings.value
+        val priorities = preferences.addonUrls.withIndex().associate { it.value to it.index }
+        return addons.value.filterNot { it.baseUrl in preferences.excludedAddonUrls }
+            .sortedBy { priorities[it.baseUrl] ?: Int.MAX_VALUE }
+    }
+
     private suspend fun <T> queryProviders(block: suspend (Addon) -> List<T>): List<T> = coroutineScope {
-        val providers = addons.value
+        val providers = enabledAddons()
         val checks = providers.map { addon -> async {
             providerSlots.withPermit {
                 try { block(addon) to null }
@@ -200,6 +213,12 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     fun logoutNuvio() = runJob { val revoked=accounts.logoutNuvio();message.value=if(revoked) "Signed out of Nuvio; local titles and addons retained" else "Nuvio sign-in cleared locally; remote revocation could not be confirmed" }
     fun saveToWatchlist(item: MediaItem) = runJob { store.addToWatchlist(item); message.value = "Saved to local watchlist" }
     fun removeFromWatchlist(item: MediaItem) = runJob { store.removeFromWatchlist(item); message.value = "Removed from watchlist" }
+    fun createCollection(name: String) = runJob { store.createCollection(name) }
+    fun deleteCollection(name: String) = runJob { store.deleteCollection(name) }
+    fun setCollectionTitle(name: String, item: MediaItem, saved: Boolean) = runJob {
+        store.setCollectionTitle(name, item, saved)
+        message.value = if (saved) "Saved to $name" else "Removed from $name"
+    }
     fun report(text: String?) { message.value = text }
     fun runJob(block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -235,6 +254,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                 (if (failures.size > 3) "; +${failures.size - 3} more failed" else "") else ""
     }
     fun removeAddon(url: String) = runJob { store.removeAddon(url); message.value = "Addon removed" }
+    fun setAddonEnabled(url: String, enabled: Boolean) = runJob {
+        store.setAddonEnabled(url, enabled)
+        catalog.value = emptyList()
+        catalogSearch.value = null
+    }
     fun addExtensionRepo(url: String) = runJob {
         val label = cloudstream.inspectRepository(url)
         store.addRepository(url.trim())
@@ -314,7 +338,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun savedCatalogItems(): List<MediaItem> {
-        if (catalog.value.isEmpty() && (addons.value.any { it.supportsCatalog } || cloudHostStatuses.value.any { it.providers.isNotEmpty() })) {
+        if (catalog.value.isEmpty() && (enabledAddons().any { it.supportsCatalog } || cloudHostStatuses.value.any { it.supportsCatalog })) {
             catalog.value = loadProviderCatalogs()
         }
         return (catalog.value + watchlist.value).distinctBy { it.type to it.id }
@@ -384,7 +408,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
-        val metadataSources = addons.value.filter { it.supportsMeta } +
+        val metadataSources = enabledAddons().filter { it.supportsMeta } +
             Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
         // Fetch metadata concurrently, but merge in configured-provider order.
         // One slow provider must not delay every provider after it.
@@ -406,12 +430,8 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         currentItem.value = enrichedItem
-        if (addons.value.none { it.supportsStreams }) {
-            message.value = "No stream-capable Stremio addon is connected. Add or refresh a streaming provider in Settings → Integrations."
-            return
-        }
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
-            val metadataSources = addons.value.filter { it.supportsMeta } +
+            val metadataSources = enabledAddons().filter { it.supportsMeta } +
                 com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
             episodes.value = coroutineScope {
                 metadataSources.distinctBy { it.baseUrl }.map { addon ->
@@ -440,6 +460,10 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     private suspend fun fetchStreams(media: MediaItem) {
+        if (enabledAddons().none { it.supportsStreams }) {
+            message.value = "Enable a stream-capable addon under Settings → Integrations."
+            return
+        }
         val found = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
             .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
         showStreams(found, providerWarnings.value)
@@ -448,11 +472,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     private fun showStreams(found: List<StreamOption>, warning: String? = null) {
         // Keep raw provider results so the UI can change language and bandwidth filters without another request.
         streams.value = found
-        val matched = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
+        val matched = StreamFilters.select(found, currentItem.value?.isAnime == true, settings.value)
         message.value = when {
             found.isEmpty() -> listOfNotNull("No streams returned by connected providers", warning).joinToString(". ")
-            matched.isEmpty() -> "No streams match the selected anime language filter. Switch to All in Settings → Anime."
-            found.none { it.playable } -> "Sources were found, but none is a directly playable HTTPS stream. Torrent playback is not supported yet."
+            matched.isEmpty() -> "No sources match your active filters."
+            matched.none { it.playable } && matched.any { it.hasTorrent } -> "Use Real-Debrid to resolve a supported torrent source."
             else -> warning
         }
     }
@@ -480,15 +504,50 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
             stream.playable -> realDebrid.resolve(token, requireNotNull(stream.url))
             else -> error("This source has no supported HTTPS link or torrent hash")
         }
-        activeStream.value = stream.copy(url = direct, provider = "Real-Debrid", infoHash = null, fileIndex = null)
+        val sameSource = direct == stream.url
+        play(stream.copy(url = direct, provider = "Real-Debrid", infoHash = null, fileIndex = null,
+            headers = if (sameSource) stream.headers else emptyMap(),
+            cloudStreamSession = sameSource && stream.cloudStreamSession,
+            mimeType = stream.mimeType.takeIf { sameSource }))
     }
+    fun playbackKey(item: MediaItem, episode: String?): String =
+        CloudStreamInstaller.digest("${item.type}\u0000${item.id}\u0000${episode.orEmpty()}")
+
+    fun recordPlayback(key: String?, positionMs: Long, durationMs: Long) {
+        if (key == null) return
+        viewModelScope.launch {
+            try {
+                store.savePlaybackPosition(key, resumablePosition(positionMs, durationMs))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                message.value = "Could not save playback progress"
+            }
+        }
+    }
+
     fun play(stream: StreamOption) {
-        if (!stream.playable) { message.value = "This source requires a torrent/debrid engine that is not integrated yet"; return }
+        if (!stream.playable) {
+            message.value = "Choose a playable HTTPS source or resolve a supported torrent with Real-Debrid."
+            return
+        }
+        activePlaybackKey = currentItem.value?.let { playbackKey(it, selectedEpisode.value) }
+        playbackStartMs = activePlaybackKey?.let { playbackPositions.value[it] } ?: 0L
         activeStream.value = stream
     }
+
+    fun continuePlayback(stream: StreamOption, positionMs: Long) {
+        playbackStartMs = positionMs.coerceAtLeast(0)
+        activeStream.value = stream
+    }
+
     fun playTestVideo() {
         currentItem.value = MediaItem("demo", "movie", "Big Buck Bunny • Creative Commons test video")
-        activeStream.value = StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample")
+        activePlaybackKey = null
+        continuePlayback(
+            StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample"),
+            0L,
+        )
     }
     fun download(url: String, filename: String) = runJob {
         val id = android.downloadFile(url, filename)

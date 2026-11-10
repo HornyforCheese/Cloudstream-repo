@@ -96,7 +96,7 @@ fun HomeScreen(
             }
         }
         if (items.isEmpty()) {
-            MutinyPanel("Welcome aboard", Modifier.padding(horizontal = 16.dp)) {
+            MutinyPanel("Aha mateys", Modifier.padding(horizontal = 16.dp)) {
                 Text("Connect a Stremio catalog or import your library to see movies, series and anime here.")
                 Button(onClick = onSearch) { Text("Search for titles") }
                 OutlinedButton(onClick = onSettings) { Text("Connect providers") }
@@ -161,8 +161,13 @@ private fun PosterShelf(title: String, items: List<MediaItem>, onSelectTitle: (M
 fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon>, detailOnly: Boolean = false, onBack: () -> Unit = {}) {
     val context = LocalContext.current
     val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val cloudStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
+    val hasCloudCatalog = cloudStatuses.any { it.supportsCatalog }
+    val enabledAddons = addons.filterNot { it.baseUrl in settings.excludedAddonUrls }
+    val collections by vm.collections.collectAsStateWithLifecycle()
     val episodes by vm.episodes.collectAsStateWithLifecycle()
     val selectedEpisode by vm.selectedEpisode.collectAsStateWithLifecycle()
+    val progress by vm.playbackPositions.collectAsStateWithLifecycle()
     val streams by vm.streams.collectAsStateWithLifecycle()
     val current by vm.currentItem.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -175,10 +180,10 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
             TextButton(onClick = onBack) { Text("‹ Back to titles") }
             PanelTitle(current?.title ?: "Loading title…", "Episodes and available sources")
         } else {
-        PanelTitle("Discover & play", "Find streams using installed Stremio addons or a direct media ID.")
-        if (addons.isEmpty()) Text("No Stremio addons connected. Open Settings → Integrations to add a provider.", color = MaterialTheme.colorScheme.error)
+        PanelTitle("Discover & play", "Browse CloudStream providers and Stremio-compatible addons, or look up a Stremio media ID.")
+        if (enabledAddons.isEmpty() && cloudStatuses.none { it.providers.isNotEmpty() }) Text("Connect a provider under Settings → Integrations.", color = MaterialTheme.colorScheme.error)
         MutinyPanel("Provider catalogs") {
-            OutlinedButton(onClick = { vm.browseCatalogs() }, enabled = !busy && addons.any { it.supportsCatalog }) {
+            OutlinedButton(onClick = { vm.browseCatalogs() }, enabled = !busy && (hasCloudCatalog || enabledAddons.any { it.supportsCatalog })) {
                 Text("Browse catalogs")
             }
             CatalogResultRows(catalog.take(40), { vm.loadStreams(it) }, { vm.saveToWatchlist(it) })
@@ -197,7 +202,7 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                 Switch(checked = anime, onCheckedChange = { anime = it })
             }
             Button(onClick = { vm.lookup(type, directId, anime || directId.startsWith("kitsu:") || directId.startsWith("mal:")) },
-                enabled = !busy && directId.isNotBlank() && addons.isNotEmpty()) { Text("Find available streams") }
+                enabled = !busy && directId.isNotBlank() && enabledAddons.any { it.supportsStreams }) { Text("Find available streams") }
         }
         }
         if (detailOnly && busy) {
@@ -241,10 +246,23 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
         }
         if (current != null) {
             val isAnime = current!!.isAnime
-            val filtered = StreamFilters.filterAnime(streams, isAnime, settings.animeMode)
-            val ranked = StreamFilters.rankForBandwidth(filtered, settings)
+            val ranked = StreamFilters.select(streams, isAnime, settings)
             MutinyPanel("Sources for ${current!!.title}") {
                 OutlinedButton(onClick = { vm.saveToWatchlist(current!!) }) { Text("Save title to watchlist") }
+                if (collections.isNotEmpty()) {
+                    var open by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { open = true }) { Text("Add to collection") }
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            collections.forEach { collection ->
+                                DropdownMenuItem(text = { Text(collection.name) }, onClick = {
+                                    open = false
+                                    current?.let { vm.setCollectionTitle(collection.name, it, true) }
+                                })
+                            }
+                        }
+                    }
+                }
                 Text("${streams.size} sources returned • ${ranked.size} matched", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!busy && streams.isEmpty()) {
                     Text(
@@ -257,9 +275,12 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                 if (streams.isNotEmpty() && streams.none { it.playable }) {
                     Text("No directly playable HTTPS sources. Torrent hashes can be resolved with a connected Real-Debrid account.", color = MaterialTheme.colorScheme.error)
                 }
-                if (isAnime) Text("Anime language mode: ${settings.animeMode.name}. Change in Settings → Anime.")
+                if (isAnime) Text("Anime language mode: ${settings.animeMode.name}. Change in Settings → Playback.")
+                settings.exactResolution?.let { Text("Resolution filter: ${it}p only") }
+                val resumeAt = progress[vm.playbackKey(current!!, selectedEpisode)]
+                if (resumeAt != null) Text("Playback resumes at ${resumeAt / 60_000}:${(resumeAt / 1000 % 60).toString().padStart(2, '0')}")
                 if (settings.lowBandwidth) Text("Prioritising ≤${settings.resolution}p and ~${settings.videoKbps} kbps when providers supply metadata.", color = MaterialTheme.colorScheme.secondary)
-                if (streams.isNotEmpty() && ranked.isEmpty()) Text("No verified ${settings.animeMode.name.lowercase()} tags. Switch to All in Anime settings to reveal unlabelled streams.", color = MaterialTheme.colorScheme.error)
+                if (streams.isNotEmpty() && ranked.isEmpty()) Text("No sources match your filters. Check Settings → Playback and Integrations.", color = MaterialTheme.colorScheme.error)
                 ranked.take(70).forEach { option ->
                     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Text(option.title, maxLines = 3, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
@@ -316,16 +337,42 @@ fun AiScreen(vm: MutinyViewModel, settings: UserSettings) {
 @Composable
 fun LibraryScreen(vm: MutinyViewModel, onBack: () -> Unit, onBrowse: () -> Unit) {
     val saved by vm.watchlist.collectAsStateWithLifecycle()
+    val collections by vm.collections.collectAsStateWithLifecycle()
+    var name by rememberSaveable { mutableStateOf("") }
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteName by remember { mutableStateOf<String?>(null) }
+    val collection = collections.firstOrNull { it.name == selected }
+    val items = collection?.titles ?: saved
+    val pendingDelete = deleteName
+    if (pendingDelete != null) {
+        AlertDialog(onDismissRequest = { deleteName = null }, title = { Text("Delete collection?") },
+            text = { Text(pendingDelete) },
+            confirmButton = { TextButton(onClick = { vm.deleteCollection(pendingDelete); selected = null; deleteName = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { deleteName = null }) { Text("Cancel") } })
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        PanelTitle("My Library", "Saved locally on this device. No external account synchronization.")
+        PanelTitle("My Library", "Watchlist and collections saved on this device.")
         OutlinedButton(onClick = onBack) { Text("Back") }
-        if (saved.isEmpty()) Text("Your watchlist is empty. Save a title from Browse to find it here later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        saved.forEach { item ->
+        MutinyPanel("Collections") {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = collection == null, onClick = { selected = null }, label = { Text("Watchlist") })
+                collections.forEach { group ->
+                    FilterChip(selected = selected == group.name, onClick = { selected = group.name }, label = { Text(group.name) })
+                }
+            }
+            OutlinedTextField(name, { name = it.take(60) }, label = { Text("Collection name") }, singleLine = true)
+            Button(onClick = { vm.createCollection(name); name = "" }, enabled = name.isNotBlank()) { Text("Create collection") }
+            if (collection != null) TextButton(onClick = { deleteName = collection.name }) { Text("Delete this collection") }
+        }
+        if (items.isEmpty()) Text("Save titles from Browse or Search to find them here later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        items.forEach { item ->
             MutinyPanel(item.title) {
-                Text("${item.type} • ${item.id}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(item.type.replaceFirstChar(Char::uppercase), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.loadStreams(item); onBrowse() }) { Text("Find streams") }
-                    OutlinedButton(onClick = { vm.removeFromWatchlist(item) }) { Text("Remove") }
+                    OutlinedButton(onClick = {
+                        if (collection == null) vm.removeFromWatchlist(item) else vm.setCollectionTitle(collection.name, item, false)
+                    }) { Text("Remove") }
                 }
             }
         }

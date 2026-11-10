@@ -32,11 +32,18 @@ import com.mutinymedia.android.domain.UserSettings
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Unit, onPlaybackFailure: (StreamOption) -> Unit = {}) {
+fun MutinyPlayer(
+    stream: StreamOption,
+    settings: UserSettings,
+    onExit: () -> Unit,
+    initialPositionMs: Long = 0L,
+    onPosition: (Long, Long) -> Unit = { _, _ -> },
+    onPlaybackFailure: (StreamOption, Long) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var savedPosition by rememberSaveable(stream.url) { mutableLongStateOf(0L) }
-    var shouldPlay by rememberSaveable(stream.url) { mutableStateOf(true) }
+    var savedPosition by rememberSaveable(stream) { mutableLongStateOf(initialPositionMs) }
+    var shouldPlay by rememberSaveable(stream) { mutableStateOf(true) }
     val selector = remember(stream.id) { DefaultTrackSelector(context) }
     val bandwidthMeter = remember(stream.url, stream.headers) {
         DefaultBandwidthMeter.Builder(context).build()
@@ -71,10 +78,26 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
             setHandleAudioBecomingNoisy(true)
         }
     }
+    val latestPositionHandler by rememberUpdatedState(onPosition)
+    fun reportPosition() {
+        val duration = player.duration
+        if (duration > 0 && !player.isCurrentMediaItemLive &&
+            (player.playbackState == androidx.media3.common.Player.STATE_READY ||
+                player.playbackState == androidx.media3.common.Player.STATE_ENDED)) {
+            latestPositionHandler(player.currentPosition, duration)
+        }
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            delay(15_000)
+            if (player.isPlaying) reportPosition()
+        }
+    }
     DisposableEffect(player, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
+                    reportPosition()
                     savedPosition = player.currentPosition
                     shouldPlay = player.playWhenReady
                     player.pause()
@@ -85,6 +108,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            reportPosition()
             savedPosition = player.currentPosition
             lifecycleOwner.lifecycle.removeObserver(observer)
             player.release()
@@ -123,7 +147,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 playbackError = "Playback failed: ${error.errorCodeName}. Trying another source if available."
-                latestFailureHandler(stream)
+                latestFailureHandler(stream, player.currentPosition)
             }
         }
         player.addListener(listener)
@@ -146,7 +170,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
                     PlayerView(context).apply {
                         this.player = player
                         useController = true
-                        setShowSubtitleButton(stream.subtitles.isNotEmpty())
+                        setShowSubtitleButton(true)
                         this.resizeMode = resizeMode
                         keepScreenOn = true
                     }
@@ -154,7 +178,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
                 update = {
                     it.player = player
                     it.resizeMode = resizeMode
-                    it.setShowSubtitleButton(stream.subtitles.isNotEmpty())
+                    it.setShowSubtitleButton(true)
                 },
                 modifier = Modifier.fillMaxSize(),
             )

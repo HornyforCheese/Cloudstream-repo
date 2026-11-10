@@ -46,6 +46,7 @@ class CloudStreamHost(context: Context) {
         val version: Int = 0,
         val providers: List<String> = emptyList(),
         val hasSettings: Boolean = false,
+        val supportsCatalog: Boolean = false,
     )
 
     internal data class Provider(val key: String, val api: MainAPI)
@@ -239,7 +240,8 @@ class CloudStreamHost(context: Context) {
         val names = loaded.providers.map { it.api.name }
         return status(id, loaded.manifest, State.ACTIVE,
             if (names.isEmpty()) "Extractor extension active" else "${names.size} registered provider(s)")
-            .copy(providers = names, hasSettings = (loaded.plugin as? Plugin)?.openSettings != null)
+            .copy(providers = names, hasSettings = (loaded.plugin as? Plugin)?.openSettings != null,
+                supportsCatalog = loaded.providers.any { pluginCall { it.api.hasMainPage } == true })
     }
 
     private fun status(id: String, manifest: CloudStreamInstaller.Manifest, state: State, detail: String) =

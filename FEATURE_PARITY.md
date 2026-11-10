@@ -1,25 +1,20 @@
-# Feature parity tracker
+# Android feature status
 
-| Windows Mutiny Media goal | Android project status | Scope / next step |
+| Area | Implemented in Android | Remaining work |
 |---|---|---|
-| Pirate ship logo in every branded surface | **Implemented in Android entry point** | Audit every future surface and adaptive icon masks |
-| Startup shows Mutiny Media | **Implemented** | Android app label and native header; add animated splash later |
-| Phone/tablet landscape responsive UI | **Implemented starter** | Needs device tests |
-| Native Android TV / DPAD | **Partial** | Layout uses rail; focus testing and launcher support pending |
-| Stremio addon support | **Partially functional** | Manifest/catalog/stream HTTPS, metadata episodes, request headers and external links; account login pending |
-| Nuvio | **Not implemented** | Requires authenticated provider adapter |
-| CloudStream | **Repository discovery only** | Needs isolated extension runtime |
-| Ultra Low Bandwidth 200–1500 kbps | **Implemented preference/ranking + track constraints** | ABR only on compatible HLS/DASH; no transcoder |
-| Anime English dub / Japanese sub filters | **Implemented metadata-based filtering** | Source tags frequently unknown; no false certainty |
-| OpenRouter AI chat | **Implemented client** | Needs network/API key and end-to-end testing |
-| Local game launcher | **Implemented for Android packages** | Windows games require remote streaming |
-| Game torrent downloader | **Not implemented** | Native P2P service and safe storage policies needed |
-| Stream games while downloading | **Not implemented** | Source/progressive asset delivery not universal |
-| Direct HTTPS downloads | **Implemented via system DownloadManager** | Progress UI and downloads database pending |
-| Persistent watchlists / continue-watching | **Local watchlist implemented; progress not implemented** | DataStore-backed local watchlist; profile sync and resume positions still needed |
-| Video player | **Media3 direct URL player implemented** | Lifecycle pause/resume, retry and audio focus included; background media session, Cast, PiP and device testing pending |
-| Theme Studio | **Native theme only** | Persisted token editing and live preview pending |
-| Transparent bottom action buttons | **Raised quick-action buttons** | Visual polish/device screenshots pending |
-| Full screen aspect ratio | **FIT / FILL-CROP toggle implemented in source** | No stretching; device tests pending |
+| Branding and layout | Mutiny Media app name and ship artwork, responsive phone and tablet navigation, pirate welcome panel | Verify focus and launcher behavior on Android TV and handhelds |
+| Stremio | HTTPS manifests, catalogs, metadata, episodes, streams, account import, persistent addon priority and exclusion | Verify live accounts and provider combinations on a device |
+| Nuvio | Server discovery, sign-in, profile selection and import of compatible addons and saved titles | Native Nuvio extension execution |
+| CloudStream | v4.5.4 provider ABI, extension loading, provider catalogs, search, episodes and stream extraction | Validate trusted third-party extensions on a physical device |
+| Search | Combined provider results and deduplication by exact type and ID, plus OpenRouter search over saved catalogs | Cross-provider matching for different title IDs |
+| Stream selection | Exact source resolution, bandwidth and codec preferences, automatic HTTPS fallback | Resolution and bitrate guarantees require accurate source metadata and suitable provider tracks |
+| Anime | English dub, sub-labelled sources, dual audio and uncensored/uncut filters | Independent verification of provider labels |
+| Playback | Media3, external subtitle tracks, bitrate readout, local per-title/episode resume, source fallback | CPU/GPU upscaling, Cast, PiP and background playback |
+| Real-Debrid | HTTPS hoster links and supported torrent hashes resolved through the user's account | Direct P2P playback and live account verification |
+| Library | Local watchlist and named collections | Account sync for local edits and collection export |
+| Appearance | Live colour presets, system/serif/monospace fonts and randomisation | Full desktop Theme Studio parity with custom layouts and theme import/export |
+| AI | OpenRouter API key entry and key link, free text model picker and recommendations | Verify a live request with the user's account |
+| Downloads | Direct HTTPS files through Android DownloadManager | Torrent downloads and game streaming |
+| Additional integrations | Supported settings are available from their working screens | Watch parties, tracking services, TMDB/MDBList/OMDb settings, Live TV and Discord |
 
-**Verification:** See REBUILD_STATUS.md for current build/test results and DEVICE_CHECKLIST.md for target-device verification.
+See [device verification](DEVICE_CHECKLIST.md) and [the CloudStream runtime notes](docs/CLOUDSTREAM_HOST_COMPATIBILITY.md).

@@ -122,9 +122,9 @@ class StremioClient(
             }?.toMap().orEmpty()
             val infoHash = stream.optString("infoHash").trim().takeIf { it.matches(Regex("[a-fA-F0-9]{40}")) }
             val fileIndex = stream.optInt("fileIdx", -1).takeIf { it >= 0 }
-            StreamOption("${addon.id}#$i", title.ifBlank { "Stream ${i+1}" },
+            StreamOption("${addon.id}:${CloudStreamInstaller.digest(addon.baseUrl)}#$i", title.ifBlank { "Stream ${i+1}" },
                 stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers,
-                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex)
+                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex, addonUrl = addon.baseUrl)
         }
     }
 }
