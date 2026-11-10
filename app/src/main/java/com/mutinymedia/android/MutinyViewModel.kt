@@ -332,12 +332,26 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         currentItem.value = media
         val metadataSources = addons.value.filter { it.supportsMeta } +
             Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
-        // Prefer a configured metadata provider, then use Cinemeta as a public fallback.
-        for (source in metadataSources) {
-            val enriched = providerResult { stremio.metadata(source, currentItem.value!!) } ?: continue
-            currentItem.value = enriched
-            if (enriched.poster != null && enriched.description != null && enriched.title != media.id) break
+        // Fetch metadata concurrently, but merge in configured-provider order.
+        // One slow provider must not delay every provider after it.
+        val metadataResults = coroutineScope {
+            metadataSources.distinctBy { it.baseUrl }.map { source ->
+                async { providerSlots.withPermit { providerResult { stremio.metadata(source, media) } } }
+            }.awaitAll()
         }
+        var enrichedItem = media
+        for (candidate in metadataResults.filterNotNull()) {
+            enrichedItem = enrichedItem.copy(
+                title = if (enrichedItem.title == media.id && candidate.title != media.id) candidate.title else enrichedItem.title,
+                poster = enrichedItem.poster ?: candidate.poster,
+                description = enrichedItem.description ?: candidate.description,
+                isAnime = enrichedItem.isAnime || candidate.isAnime,
+                genres = enrichedItem.genres.ifEmpty { candidate.genres },
+                year = enrichedItem.year ?: candidate.year,
+                cast = enrichedItem.cast.ifEmpty { candidate.cast },
+            )
+        }
+        currentItem.value = enrichedItem
         if (addons.value.none { it.supportsStreams }) {
             message.value = "No stream-capable Stremio addon is connected. Add or refresh a streaming provider in Settings → Integrations."
             return
@@ -345,8 +359,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
             val metadataSources = addons.value.filter { it.supportsMeta } +
                 com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
-            episodes.value = metadataSources.flatMap { addon -> providerResult { stremio.episodes(addon, media) }.orEmpty() }
-                .distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
+            episodes.value = coroutineScope {
+                metadataSources.distinctBy { it.baseUrl }.map { addon ->
+                    async { providerSlots.withPermit { providerResult { stremio.episodes(addon, media) }.orEmpty() } }
+                }.awaitAll()
+            }.flatten().distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
             if (episodes.value.isNotEmpty()) {
                 message.value = "Select an episode to find streams"
                 return
