@@ -309,6 +309,9 @@ private fun AnimeSettings(vm: MutinyViewModel, s: UserSettings) {
 private fun AiSettings(vm: MutinyViewModel, s: UserSettings) {
     var key by remember { mutableStateOf("") }
     var model by remember(s.openRouterModel) { mutableStateOf(s.openRouterModel) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    val freeModels by vm.freeOpenRouterModels.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     PanelTitle("Ask AI", "Connect your own OpenRouter account. Keys are encrypted using Android Keystore.")
     MutinyPanel("OpenRouter") {
         Text("Existing key: ${if (vm.secrets.readOpenRouter().isNullOrBlank()) "not set" else "saved securely"}")
@@ -320,6 +323,30 @@ private fun AiSettings(vm: MutinyViewModel, s: UserSettings) {
         }
         OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text("Model ID") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { vm.runJob { vm.store.setModel(model) } }, enabled = model.isNotBlank()) { Text("Save model") }
+        OutlinedButton(onClick = { vm.refreshOpenRouterModels() }, enabled = !busy) {
+            Text("Refresh free models")
+        }
+        if (freeModels.isNotEmpty()) {
+            Box {
+                OutlinedButton(onClick = { modelMenuOpen = true }) { Text("Choose a free model") }
+                DropdownMenu(
+                    expanded = modelMenuOpen,
+                    onDismissRequest = { modelMenuOpen = false },
+                    modifier = Modifier.heightIn(max = 360.dp),
+                ) {
+                    freeModels.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.name) },
+                            onClick = {
+                                modelMenuOpen = false
+                                model = option.id
+                                vm.runJob { vm.store.setModel(option.id) }
+                            },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

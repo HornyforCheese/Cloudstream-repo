@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.mutinymedia.android.domain.AnimeStreamMode
 import com.mutinymedia.android.domain.CodecPreference
+import com.mutinymedia.android.domain.DEFAULT_OPENROUTER_MODEL
 import com.mutinymedia.android.domain.ThemeFont
 import com.mutinymedia.android.domain.ThemePreset
 import com.mutinymedia.android.domain.UserSettings
@@ -50,7 +51,7 @@ class SettingsStore(private val context: Context) {
                 animeMode = enumValueOrDefault(p[K.anime], AnimeStreamMode.ALL),
                 addonUrls = parseStringList(p[K.addons]),
                 extensionRepositories = parseStringList(p[K.repos]),
-                openRouterModel = p[K.model] ?: "openai/gpt-4o-mini",
+                openRouterModel = p[K.model] ?: DEFAULT_OPENROUTER_MODEL,
                 themePreset = enumValueOrDefault(p[K.themePreset], ThemePreset.MUTINY),
                 themeFont = enumValueOrDefault(p[K.themeFont], ThemeFont.DEFAULT),
             )

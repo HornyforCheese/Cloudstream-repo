@@ -42,6 +42,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val installedCloudPlugins = MutableStateFlow(cloudInstaller.registeredPackages().keys)
     val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
     private val openrouter = OpenRouterClient()
+    val freeOpenRouterModels = MutableStateFlow<List<OpenRouterModel>>(emptyList())
     private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
     val debridAccount = MutableStateFlow<String?>(null)
     val settings: StateFlow<UserSettings> = store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings())
@@ -290,6 +291,12 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         val id = android.downloadFile(url, filename)
         message.value = "Android DownloadManager queued job #$id"
     }
+    fun refreshOpenRouterModels() = runJob {
+        val models = openrouter.listFreeModels()
+        check(models.isNotEmpty()) { "OpenRouter returned no free text models. Try refreshing again later." }
+        freeOpenRouterModels.value = models
+    }
+
     fun saveOpenRouterKey(value: String) {
         try { secrets.saveOpenRouter(value); message.value = if (value.isBlank()) "OpenRouter key cleared" else "OpenRouter key encrypted and saved" }
         catch (e: Exception) { message.value = "Unable to store key: ${e.message}" }

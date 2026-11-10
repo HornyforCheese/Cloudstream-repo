@@ -1,5 +1,9 @@
 package com.mutinymedia.android.domain
 
+const val DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+
+data class OpenRouterModel(val id: String, val name: String)
+
 enum class AnimeStreamMode { ALL, DUB, SUB }
 enum class CodecPreference { EFFICIENT, COMPATIBLE }
 enum class ThemePreset(val label: String) {
@@ -19,7 +23,7 @@ data class UserSettings(
     val animeMode: AnimeStreamMode = AnimeStreamMode.ALL,
     val addonUrls: List<String> = emptyList(),
     val extensionRepositories: List<String> = emptyList(),
-    val openRouterModel: String = "openai/gpt-4o-mini",
+    val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
     val themePreset: ThemePreset = ThemePreset.MUTINY,
     val themeFont: ThemeFont = ThemeFont.DEFAULT,
 ) {
