@@ -7,6 +7,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import android.app.Activity
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +108,28 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
 
 @Composable
 private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
+    val context = LocalContext.current
+    var restartRequested by remember { mutableStateOf(false) }
+    if (restartRequested) {
+        AlertDialog(
+            onDismissRequest = { restartRequested = false },
+            title = { Text("Apply your new theme?") },
+            text = { Text("Your theme has been saved. Restart Mutiny Media now to apply it throughout the app, or choose Later to apply it next time you open the app.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    restartRequested = false
+                    val activity = context as? Activity
+                    if (activity != null) {
+                        val launch = Intent(activity, activity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        activity.startActivity(launch)
+                        activity.finish()
+                    }
+                }) { Text("Restart now") }
+            },
+            dismissButton = { TextButton(onClick = { restartRequested = false }) { Text("Later") } },
+        )
+    }
     MutinyPanel("Theme Studio") {
         Text("Colour preset", style = MaterialTheme.typography.titleSmall)
         Row(
@@ -114,12 +139,12 @@ private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
             ThemePreset.entries.forEach { preset ->
                 FilterChip(
                     selected = settings.themePreset == preset,
-                    onClick = { vm.runJob { vm.store.setThemePreset(preset) } },
+                    onClick = { if (settings.themePreset != preset) vm.runJob { vm.store.setThemePreset(preset); restartRequested = true } },
                     label = { Text(preset.label) },
                 )
             }
         }
-        OutlinedButton(onClick = { vm.runJob { vm.store.randomizeThemePreset() } }) {
+        OutlinedButton(onClick = { vm.runJob { vm.store.randomizeThemePreset(); restartRequested = true } }) {
             Text("Randomise theme")
         }
         Text("App font", style = MaterialTheme.typography.titleSmall)
@@ -130,7 +155,7 @@ private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
             ThemeFont.entries.forEach { font ->
                 FilterChip(
                     selected = settings.themeFont == font,
-                    onClick = { vm.runJob { vm.store.setThemeFont(font) } },
+                    onClick = { if (settings.themeFont != font) vm.runJob { vm.store.setThemeFont(font); restartRequested = true } },
                     label = { Text(font.label) },
                 )
             }
