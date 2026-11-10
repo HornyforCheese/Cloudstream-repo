@@ -16,18 +16,21 @@ class StremioClient(
 ) {
     private suspend fun fetch(url: String, limit: Int = 2_000_000) = fetchJson(url, limit)
     private fun encode(value: String) = URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+    /** Preserve configured addon paths and reject ambiguous manifest URLs. */
     fun normalizeBase(input: String): String {
         val raw = input.trim().replace(Regex("^stremio://", RegexOption.IGNORE_CASE), "https://")
         require(raw.startsWith("https://", ignoreCase = true)) { "Paste an HTTPS add-on manifest URL" }
-        val cleaned = raw.trimEnd('/').removeSuffix("/manifest.json")
-        require(!cleaned.contains('?') && cleaned.length < 2000) { "Invalid add-on URL" }
-        val uri = URI(cleaned)
-        require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) { "Invalid add-on URL" }
-        return cleaned
+        val uri = URI(raw)
+        require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "Invalid add-on URL" }
+        require(raw.length < 2000) { "Add-on URL is too long" }
+        val path = uri.rawPath.orEmpty().trimEnd('/')
+        val basePath = if (path.endsWith("/manifest.json", ignoreCase = true)) path.dropLast("/manifest.json".length) else path
+        return (uri.scheme.lowercase() + "://" + uri.rawAuthority + basePath).trimEnd('/')
     }
+    fun manifestUrl(input: String): String = normalizeBase(input) + "/manifest.json"
     suspend fun inspectAddon(url: String): Addon {
         val base = normalizeBase(url)
-        val json = fetch("$base/manifest.json", 500_000)
+        val json = fetch(manifestUrl(url), 500_000)
         require(json.optString("id").isNotBlank() && json.optString("name").isNotBlank() && json.has("resources")) { "Invalid Stremio manifest" }
         val id = json.optString("id").ifBlank { base }
         val resources = json.optJSONArray("resources") ?: JSONArray()
