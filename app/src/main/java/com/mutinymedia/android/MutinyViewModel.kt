@@ -61,6 +61,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
 
     private val operationMutex = Mutex()
     private val providerSlots = Semaphore(4)
+    private val providerWarnings = MutableStateFlow<String?>(null)
     private suspend fun <T> queryProviders(block: suspend (Addon) -> List<T>): List<T> = coroutineScope {
         val providers = addons.value
         val checks = providers.map { addon -> async {
@@ -75,16 +76,26 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
             error("All ${providers.size} providers failed: " + failures.take(3).joinToString("; ") +
                 (if (failures.size > 3) "; +${failures.size - 3} more failed" else ""))
         }
-        if (failures.isNotEmpty()) {
-            message.value = "${providers.size - failures.size}/${providers.size} providers succeeded. " +
+        providerWarnings.value = if (failures.isNotEmpty()) {
+            "${providers.size - failures.size}/${providers.size} providers succeeded. " +
                 failures.take(3).joinToString("; ") +
                 (if (failures.size > 3) "; +${failures.size - 3} more failed" else "")
-        }
+        } else null
+        if (providerWarnings.value != null) message.value = providerWarnings.value
         checks.mapNotNull { it.first }.flatten()
     }
 
     private suspend fun <T> providerResult(block: suspend () -> T): T? =
-        try { block() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        try { block() } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            val reason = when (e) {
+                is java.net.SocketTimeoutException -> "timeout"
+                is java.net.UnknownHostException -> "DNS lookup failed"
+                else -> e.javaClass.simpleName
+            }
+            message.value = "Metadata or episode lookup failed ($reason). Other providers will be tried."
+            null
+        }
 
     /** Diagnostic contains only a hostname, never configured paths or credentials. */
     private fun addonFailure(url: String, error: Exception): String {
@@ -113,14 +124,20 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     } }.awaitAll()
                 }
-                val result = checks.mapNotNull { it.first }
+                val verified = checks.mapNotNull { it.first }
                 val failures = checks.mapNotNull { it.second }
+                // Keep previously verified providers during temporary outages, but respect removals.
+                val previous = addons.value.associateBy { it.baseUrl }
+                val result = urls.mapNotNull { url ->
+                    val base = runCatching { stremio.normalizeBase(url) }.getOrNull()
+                    verified.firstOrNull { it.baseUrl == base } ?: previous[base]
+                }.distinctBy { it.baseUrl }
                 if (addons.value.map { it.baseUrl } != result.map { it.baseUrl }) {
                     catalog.value = emptyList()
                     catalogSearch.value = null
                 }
                 addons.value = result
-                if (failures.isNotEmpty()) message.value = "Stremio: ${result.size}/${urls.size} addons loaded. " + failures.take(3).joinToString("; ") + if (failures.size > 3) "; +${failures.size - 3} more failed" else ""
+                if (failures.isNotEmpty()) message.value = "Stremio: ${verified.size}/${urls.size} addons verified; previously verified providers retained during outages. " + failures.take(3).joinToString("; ") + if (failures.size > 3) "; +${failures.size - 3} more failed" else ""
             }
         }
         // Restore sessions first, then import add-ons only when verification succeeds.
@@ -192,7 +209,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         }
         val result = checks.mapNotNull { it.first }
         val failures = checks.mapNotNull { it.second }
-        addons.value = result
+        val previous = addons.value.associateBy { it.baseUrl }
+        addons.value = urls.mapNotNull { url ->
+            val base = runCatching { stremio.normalizeBase(url) }.getOrNull()
+            result.firstOrNull { it.baseUrl == base } ?: previous[base]
+        }.distinctBy { it.baseUrl }
         message.value = "Verified ${result.size}/${urls.size} saved addons" +
             if (failures.isNotEmpty()) ". " + failures.take(3).joinToString("; ") +
                 (if (failures.size > 3) "; +${failures.size - 3} more failed" else "") else ""
@@ -342,7 +363,7 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         val filtered = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
         streams.value = StreamFilters.rankForBandwidth(filtered, settings.value)
         if (found.isNotEmpty() && filtered.isEmpty()) message.value = "No streams match the selected anime language filter"
-        if (streams.value.isEmpty()) message.value = "No streams returned by connected providers"
+        if (streams.value.isEmpty()) message.value = listOfNotNull("No playable results from connected providers", providerWarnings.value).joinToString(". ")
     }
     fun saveRealDebridKey(token: String) = runJob {
         if (token.isBlank()) {
