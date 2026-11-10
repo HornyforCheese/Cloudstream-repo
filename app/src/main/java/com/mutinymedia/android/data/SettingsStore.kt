@@ -64,14 +64,14 @@ class SettingsStore(private val context: Context) {
     suspend fun addToWatchlist(item: MediaItem) {
         context.mutinyDataStore.edit { p ->
             val current = decodeWatchlist(p[K.watchlist])
-            p[K.watchlist] = encodeWatchlist((current.filterNot { it.id == item.id && it.type == item.type } + item).takeLast(500))
+            p[K.watchlist] = encodeWatchlist((current.filterNot { it.id == item.id && it.type == item.type } + item).takeLast(2_000))
         }
     }
     suspend fun importAccountData(addonUrls: List<String>, items: List<MediaItem>) {
         context.mutinyDataStore.edit { p ->
             p[K.addons] = encodeStringList(parseStringList(p[K.addons]) + addonUrls)
             val existing = decodeWatchlist(p[K.watchlist])
-            val merged = (existing + items).distinctBy { it.type to it.id }.take(500)
+            val merged = (existing + items).distinctBy { it.type to it.id }.take(2_000)
             p[K.watchlist] = encodeWatchlist(merged)
         }
     }
@@ -82,7 +82,7 @@ class SettingsStore(private val context: Context) {
     }
     private fun decodeWatchlist(raw: String?): List<MediaItem> = runCatching {
         val array = JSONArray(raw ?: "[]")
-        (0 until minOf(array.length(), 500)).mapNotNull { i ->
+        (0 until minOf(array.length(), 2_000)).mapNotNull { i ->
             val o = array.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("id"); val type = o.optString("type"); val title = o.optString("title")
             if (id.isBlank() || title.isBlank() || type !in listOf("movie", "series", "anime")) null
