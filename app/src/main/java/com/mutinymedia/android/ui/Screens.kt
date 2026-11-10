@@ -255,7 +255,7 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                     )
                 }
                 if (streams.isNotEmpty() && streams.none { it.playable }) {
-                    Text("Providers returned sources, but none can play directly. Torrent sources require an unsupported engine.", color = MaterialTheme.colorScheme.error)
+                    Text("No directly playable HTTPS sources. Torrent hashes can be resolved with a connected Real-Debrid account.", color = MaterialTheme.colorScheme.error)
                 }
                 if (isAnime) Text("Anime language mode: ${settings.animeMode.name}. Change in Settings → Anime.")
                 if (settings.lowBandwidth) Text("Prioritising ≤${settings.resolution}p and ~${settings.videoKbps} kbps when providers supply metadata.", color = MaterialTheme.colorScheme.secondary)
@@ -267,9 +267,9 @@ fun BrowseScreen(vm: MutinyViewModel, settings: UserSettings, addons: List<Addon
                         Button(onClick = { vm.play(option) }, enabled = option.playable, modifier = Modifier.fillMaxWidth()) {
                             Text(if (option.playable) "Play HTTPS stream" else "Torrent / unsupported stream")
                         }
-                        if (!option.url.isNullOrBlank() && option.url.startsWith("https://")) {
-                            OutlinedButton(onClick = { vm.playViaRealDebrid(option) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Resolve with Real-Debrid")
+                        if (option.playable || option.hasTorrent) {
+                            OutlinedButton(onClick = { vm.playViaRealDebrid(option) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (option.hasTorrent) "Resolve torrent with Real-Debrid" else "Resolve with Real-Debrid")
                             }
                         }
                         option.externalUrl?.let { url ->
