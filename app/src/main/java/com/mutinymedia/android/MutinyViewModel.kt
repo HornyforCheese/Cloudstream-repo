@@ -123,8 +123,24 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
                 if (failures.isNotEmpty()) message.value = "Stremio: ${result.size}/${urls.size} addons loaded. " + failures.take(3).joinToString("; ") + if (failures.size > 3) "; +${failures.size - 3} more failed" else ""
             }
         }
-        viewModelScope.launch { accounts.restoreStremio() }
-        viewModelScope.launch { accounts.restoreNuvio() }
+        // Restore sessions first, then import add-ons only when verification succeeds.
+        // Import is additive; a failed remote request never clears locally saved add-ons.
+        viewModelScope.launch {
+            accounts.restoreStremio()
+            if (accounts.stremioStatus.value.connected) {
+                try { importAccount(accounts.pullStremio(), "Stremio") }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message.value = "Stremio signed in; addon sync failed. Retry import in Settings." }
+            }
+        }
+        viewModelScope.launch {
+            accounts.restoreNuvio()
+            if (accounts.nuvioStatus.value.connected) {
+                try { importAccount(accounts.pullNuvio(), "Nuvio") }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message.value = "Nuvio signed in; select or unlock your profile, then retry import." }
+            }
+        }
     }
     private suspend fun importAccount(data: AccountImport, label: String) {
         store.importAccountData(data.addons, data.items)
@@ -140,9 +156,12 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     fun logoutStremio() = runJob { val revoked=accounts.logoutStremio();message.value=if(revoked) "Signed out of Stremio; local titles and addons retained" else "Stremio sign-in cleared locally; remote revocation could not be confirmed" }
     fun loginNuvio(server: String,email: String,password: String) = runJob {
         accounts.loginNuvio(server,email,password)
-        message.value="Signed in to Nuvio. Select a profile and import its addons/watchlist."
+        message.value="Signed in to Nuvio. Select a profile to synchronize its addons."
     }
-    fun selectNuvioProfile(index: Int,pin: String) = runJob { accounts.selectNuvioProfile(index,pin);message.value="Nuvio profile selected" }
+    fun selectNuvioProfile(index: Int,pin: String) = runJob {
+        accounts.selectNuvioProfile(index,pin)
+        importAccount(accounts.pullNuvio(),"Nuvio")
+    }
     fun syncNuvio() = runJob { importAccount(accounts.pullNuvio(),"Nuvio") }
     fun verifyNuvio() = runJob { accounts.restoreNuvio() }
     fun logoutNuvio() = runJob { val revoked=accounts.logoutNuvio();message.value=if(revoked) "Signed out of Nuvio; local titles and addons retained" else "Nuvio sign-in cleared locally; remote revocation could not be confirmed" }
