@@ -45,6 +45,27 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val catalog by vm.catalog.collectAsStateWithLifecycle()
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
+    val availableStreams by vm.streams.collectAsStateWithLifecycle()
+    val playableStreams = remember(availableStreams, settings) {
+        com.mutinymedia.android.domain.StreamFilters.rankForBandwidth(
+            com.mutinymedia.android.domain.StreamFilters.filterAnime(
+                availableStreams, vm.currentItem.value?.isAnime == true, settings.animeMode
+            ), settings
+        ).filter { it.playable }
+    }
+    var attemptedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(vm.currentItem.value?.id) { attemptedSources = emptySet() }
+    fun nextSource(failed: com.mutinymedia.android.domain.StreamOption) {
+        val attempted = attemptedSources + failed.id
+        val next = playableStreams.firstOrNull { it.id !in attempted && it.id != failed.id }
+        attemptedSources = attempted
+        if (next == null) vm.report("Playback failed. No other playable HTTPS sources remain.")
+        else {
+            attemptedSources = attempted + next.id
+            vm.activeStream.value = next
+            vm.report("Trying alternative source: ${next.provider}")
+        }
+    }
     val searchState = rememberSaveableStateHolder()
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var playing by remember { mutableStateOf(false) }
@@ -58,7 +79,8 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     }
     LaunchedEffect(activeStream) { if (activeStream != null) playing = true }
     if (playing && activeStream != null) {
-        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; vm.activeStream.value = null })
+        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; vm.activeStream.value = null },
+            onPlaybackFailure = { nextSource(it) })
         return
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
