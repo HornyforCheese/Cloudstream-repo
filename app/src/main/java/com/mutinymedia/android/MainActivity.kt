@@ -3,6 +3,9 @@ package com.mutinymedia.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import com.lagradost.cloudstream3.actions.VideoClickActionHolder
+import java.lang.ref.WeakReference
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -26,9 +29,20 @@ private enum class Section(val display: String, val glyph: String) {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pluginActivityResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VideoClickActionHolder.activity = WeakReference(this)
+        VideoClickActionHolder.resultLauncher = { intent, options -> pluginActivityResult.launch(intent, options) }
         setContent { MutinyRoot() }
+    }
+
+    override fun onDestroy() {
+        if (VideoClickActionHolder.activity?.get() === this) {
+            VideoClickActionHolder.activity = null
+            VideoClickActionHolder.resultLauncher = null
+        }
+        super.onDestroy()
     }
 }
 
@@ -46,15 +60,17 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
     val availableStreams by vm.streams.collectAsStateWithLifecycle()
-    val playableStreams = remember(availableStreams, settings) {
+    val currentItem by vm.currentItem.collectAsStateWithLifecycle()
+    val selectedEpisode by vm.selectedEpisode.collectAsStateWithLifecycle()
+    val isAnime = currentItem?.isAnime == true
+    val playableStreams = remember(availableStreams, isAnime, settings) {
         com.mutinymedia.android.domain.StreamFilters.rankForBandwidth(
             com.mutinymedia.android.domain.StreamFilters.filterAnime(
-                availableStreams, vm.currentItem.value?.isAnime == true, settings.animeMode
+                availableStreams, isAnime, settings.animeMode
             ), settings
         ).filter { it.playable }
     }
-    var attemptedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
-    LaunchedEffect(vm.currentItem.value?.id) { attemptedSources = emptySet() }
+    var attemptedSources by remember(currentItem?.id, selectedEpisode) { mutableStateOf<Set<String>>(emptySet()) }
     fun nextSource(failed: com.mutinymedia.android.domain.StreamOption) {
         val attempted = attemptedSources + failed.id
         val next = playableStreams.firstOrNull { it.id !in attempted && it.id != failed.id }
@@ -72,14 +88,14 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     var showLibrary by rememberSaveable { mutableStateOf(false) }
     var showTitleDetails by rememberSaveable { mutableStateOf(false) }
     BackHandler(playing || showTitleDetails || section != Section.HOME || showLibrary) {
-        if (playing) { playing = false; vm.activeStream.value = null }
+        if (playing) { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null }
         else if (showTitleDetails) showTitleDetails = false
         else if (showLibrary) showLibrary = false
         else section = Section.HOME
     }
     LaunchedEffect(activeStream) { if (activeStream != null) playing = true }
     if (playing && activeStream != null) {
-        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; vm.activeStream.value = null },
+        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null },
             onPlaybackFailure = { nextSource(it) })
         return
     }

@@ -1,3 +1,6 @@
+import org.gradle.api.file.FileSystemOperations
+import javax.inject.Inject
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -22,6 +25,8 @@ android {
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 dependencies {
+    implementation(project(":cloudstream-runtime"))
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
     implementation(platform("androidx.compose:compose-bom:2025.08.01"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
@@ -45,4 +50,26 @@ dependencies {
     androidTestImplementation("androidx.test:rules:1.7.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+// Only the instrumentation APK carries the independently dexed fixture archives.
+abstract class StageCloudStreamFixtures : DefaultTask() {
+    @get:InputDirectory abstract val fixtures: DirectoryProperty
+    @get:OutputDirectory abstract val assets: DirectoryProperty
+    @get:Inject abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun stage() {
+        files.sync { from(fixtures); into(assets) }
+    }
+}
+
+val stageCloudStreamFixtures by tasks.registering(StageCloudStreamFixtures::class) {
+    dependsOn(":cloudstream-extension:assembleCloudStreamFixtures")
+    fixtures.set(project(":cloudstream-extension").layout.buildDirectory.dir("cs3"))
+    assets.set(layout.buildDirectory.dir("generated/cloudstreamTestAssets"))
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+    variant.androidTest?.sources?.assets?.addGeneratedSourceDirectory(stageCloudStreamFixtures, StageCloudStreamFixtures::assets)
 }

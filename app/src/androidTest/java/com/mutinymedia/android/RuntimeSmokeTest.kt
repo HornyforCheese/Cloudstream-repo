@@ -275,4 +275,18 @@ class RuntimeSmokeTest {
         assertNull(vm.secrets.readSecret("stremio_session"))
     }
 
+
+    @Test fun test12_playbackFailureSelectsNextEligibleSource() {
+        val vm = model()
+        val broken = StreamOption("fixture-broken", "Broken fixture", "file:///mutiny-missing-fixture.mp4", "Fixture")
+        val next = StreamOption("fixture-next", "Alternative fixture",
+            "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Fixture")
+        rule.runOnIdle {
+            vm.currentItem.value = MediaItem("fallback-fixture", "movie", "Fallback fixture")
+            vm.streams.value = listOf(broken, next)
+            vm.activeStream.value = broken
+        }
+        rule.waitUntil(30_000) { vm.activeStream.value?.id == next.id }
+        rule.onNodeWithText("Alternative fixture").assertExists()
+    }
 }

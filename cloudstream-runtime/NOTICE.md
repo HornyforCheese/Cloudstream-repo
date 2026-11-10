@@ -1,0 +1,5 @@
+# CloudStream Android runtime source
+
+This module contains source from [CloudStream v4.5.4](https://github.com/recloudstream/cloudstream/tree/91652da9203cd566648f1eaf27cac4e5f12c7a61), by the CloudStream contributors, distributed under the [GNU GPL v3](LICENSE). The pinned upstream revision is `91652da9203cd566648f1eaf27cac4e5f12c7a61`. Existing copyright and attribution notices are retained in the copied files.
+
+Mutiny Media adapted this source on 10 November 2026. The Android module combines the upstream common and Android sources and includes Android plugin, NewPipe downloader, and video action API declarations from the upstream app. The adaptations supply Android defaults, use the host activity for action launch APIs, require HTTPS with validated TLS in the shared provider client, and harden the WebView resolver. The integration, build configuration, dependencies and verification code are available in the same repository as the modified runtime. Distribute matching corresponding source with the Android binaries under the applicable GPL terms.
