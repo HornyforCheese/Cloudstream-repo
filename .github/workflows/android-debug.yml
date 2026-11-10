@@ -23,8 +23,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-      - name: Unit tests, lint and APKs
-        run: bash ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Check 1 - Unit tests
+        run: bash ./gradlew :app:testDebugUnitTest --stacktrace
+      - name: Check 2 - Android lint
+        run: bash ./gradlew :app:lintDebug --stacktrace
+      - name: Check 3 - Build APKs
+        run: bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - uses: actions/upload-artifact@v4
         if: success()
         with:
