@@ -45,6 +45,7 @@ class StremioClient(
         val manifest = fetch("${addon.baseUrl}/manifest.json", 500_000)
         val specs = manifest.optJSONArray("catalogs") ?: return emptyList()
         val all = mutableListOf<MediaItem>()
+        val failures = mutableListOf<Exception>()
         for (index in 0 until minOf(specs.length(), 30)) {
             val spec = specs.optJSONObject(index) ?: continue
             val type = spec.optString("type")
@@ -56,7 +57,7 @@ class StremioClient(
             val required = (0 until extra.length()).mapNotNull { extra.optJSONObject(it) }.filter { it.optBoolean("isRequired") }.map { it.optString("name") }
             if (required.any { it != "search" || query.isNullOrBlank() }) continue
             val slug = if (query.isNullOrBlank()) "" else "/search=${encode(query.trim())}"
-            val data = try { fetch("${addon.baseUrl}/catalog/${encode(type)}/${encode(id)}$slug.json") } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
+            val data = try { fetch("${addon.baseUrl}/catalog/${encode(type)}/${encode(id)}$slug.json") } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e; continue }
             val metas = data.optJSONArray("metas") ?: continue
             for (j in 0 until minOf(metas.length(), 40)) {
                 val m = metas.optJSONObject(j) ?: continue
@@ -73,6 +74,7 @@ class StremioClient(
                 )
             }
         }
+        if (failures.isNotEmpty() && all.isEmpty()) throw IllegalStateException("All ${failures.size} catalog endpoints failed", failures.first())
         return all.distinctBy { it.type to it.id }.take(300)
     }
     /** Fetches full title metadata from an addon without discarding existing poster/description. */
