@@ -70,6 +70,46 @@ class StremioClientTest {
         val initial = MediaItem("tt123", "movie", "Existing", "https://example.org/old.jpg", "Existing description")
         assertEquals(initial, client.metadata(addon, initial))
     }
+
+    @Test fun normalizesCinemetaAndStremioScheme() {
+        val client = StremioClient()
+        assertEquals("https://v3-cinemeta.strem.io", client.normalizeBase("https://v3-cinemeta.strem.io/manifest.json"))
+        assertEquals("https://v3-cinemeta.strem.io/manifest.json", client.manifestUrl("stremio://v3-cinemeta.strem.io/manifest.json"))
+        assertEquals("https://v3-cinemeta.strem.io/manifest.json", client.manifestUrl("https://v3-cinemeta.strem.io/"))
+    }
+
+    @Test fun retainsConfiguredPathAndEncodedSegments() {
+        val client = StremioClient()
+        val configured = "https://addons.example.org/%7Bconfig%7D/key%2Fvalue"
+        assertEquals(configured, client.normalizeBase("$configured/manifest.json"))
+        assertEquals("$configured/manifest.json", client.manifestUrl("$configured/manifest.json"))
+        assertEquals("$configured/manifest.json", client.manifestUrl("$configured/"))
+    }
+
+    @Test fun rejectsQueryFragmentsCredentialsAndInsecureSchemes() {
+        val client = StremioClient()
+        val invalid = listOf(
+            "http://example.org/manifest.json",
+            "https://example.org/manifest.json?token=secret",
+            "https://example.org/manifest.json#fragment",
+            "https://user:password@example.org/manifest.json",
+            "https:///manifest.json"
+        )
+        invalid.forEach { input ->
+            assertTrue("Expected rejection of invalid manifest URL", runCatching { client.normalizeBase(input) }.isFailure)
+        }
+    }
+
+    @Test fun inspectUsesExactConfiguredManifestEndpoint() = runBlocking {
+        val urls = mutableListOf<String>()
+        val client = StremioClient { url, _ ->
+            urls += url
+            JSONObject(manifest)
+        }
+        client.inspectAddon("https://addons.example.org/config%2Fabc/manifest.json")
+        assertEquals(listOf("https://addons.example.org/config%2Fabc/manifest.json"), urls)
+    }
+
     @Test fun rejectsNonManifestJson() = runBlocking {
         val client = StremioClient { _, _ -> JSONObject("{}") }
         assertTrue(runCatching { client.inspectAddon("https://example.org") }.isFailure)
