@@ -1,8 +1,14 @@
 package com.lagradost.cloudstream3.utils
+
 import android.content.Context
 import android.util.Log
+import android.widget.TextView
 import androidx.annotation.StringRes
+import androidx.core.view.isGone
+import androidx.core.view.isVisible
 import com.lagradost.cloudstream3.mvvm.logError
+import androidx.core.text.HtmlCompat
+
 sealed class UiText {
     companion object {
         const val TAG = "UiText"
@@ -86,4 +92,33 @@ fun txt(@StringRes resId: Int?, vararg args: Any?): UiText? {
         return null
     }
     return UiText.StringResource(resId, args.filterNotNull().toList())
+}
+
+fun TextView?.setText(text: UiText?) {
+    if (this == null) return
+    if (text == null) {
+        this.isVisible = false
+    } else {
+        val str = text.asStringNull(context)?.let {
+            if (this.maxLines == 1) {
+                it.replace("\n", " ")
+            } else {
+                it
+            }
+        }
+
+        this.isGone = str.isNullOrBlank()
+        this.text = str
+    }
+}
+
+fun TextView?.setTextHtml(text: UiText?) {
+    if (this == null) return
+    if (text == null) {
+        this.isVisible = false
+    } else {
+        val str = text.asStringNull(context)
+        this.isGone = str.isNullOrBlank()
+        this.text = HtmlCompat.fromHtml(str.orEmpty(), HtmlCompat.FROM_HTML_MODE_LEGACY)
+    }
 }

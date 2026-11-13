@@ -115,8 +115,6 @@ class WebViewResolver constructor(
         val extraRequestList = threadSafeListOf<Request>()
 
         main {
-            // Useful for debugging
-            WebView.setWebContentsDebuggingEnabled(false)
             try {
                 webView = WebView(
                     (getContext() as? Context)
@@ -125,6 +123,9 @@ class WebViewResolver constructor(
                     // Bare minimum to bypass captcha
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.allowFileAccess = false
+                    settings.allowContentAccess = false
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
 
                     webViewUserAgent = settings.userAgentString
                     // Don't set user agent, setting user agent will make cloudflare break.
@@ -243,7 +244,7 @@ class WebViewResolver constructor(
                         handler: SslErrorHandler?,
                         error: SslError?
                     ) {
-                        handler?.cancel() // Never bypass TLS validation in the host
+                        handler?.cancel()
                     }
                 }
                 webView?.loadUrl(url, headers.toMap())

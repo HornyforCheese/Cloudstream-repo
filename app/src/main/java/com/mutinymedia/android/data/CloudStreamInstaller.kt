@@ -2,91 +2,108 @@ package com.mutinymedia.android.data
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.zip.ZipFile
-import org.json.JSONObject
 
-/** Downloads packages into private storage. Execution is handled separately by CloudStreamHost. */
-class CloudStreamInstaller(private val context: Context) {
-    companion object {
-        fun packageId(url: String): String = MessageDigest.getInstance("SHA-256")
-            .digest(Network.validateHttps(url).toByteArray()).joinToString("") { "%02x".format(it) }
-    }
-    suspend fun uninstall(id: String): Boolean = withContext(Dispatchers.IO) {
-        require(id.matches(Regex("[a-f0-9]{64}"))) { "Invalid extension identifier" }
-        File(directory, "$id.cs3").delete()
-    }
-    private val directory get() = File(context.filesDir, "cloudstream_extensions").also { it.mkdirs() }
-    fun installed(): Set<String> = directory.listFiles()?.filter { it.extension == "cs3" }?.map { it.nameWithoutExtension }?.toSet().orEmpty()
+/** Downloads and validates executable archives before the host can activate them. */
+class CloudStreamInstaller(context: Context) {
+    private val directory = File(context.filesDir, "cloudstream_extensions")
+    private val extensionClass = Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+")
 
-    /** Returns only packages whose manifests and bytecode are still present and readable. */
-    fun registeredPackages(): Map<String, String> = buildMap {
-        directory.listFiles()?.filter { it.extension == "cs3" }?.forEach { file ->
-            runCatching {
-                val manifest = CloudStreamPackage.validate(file)
-                put(file.nameWithoutExtension, manifest.className)
-            }
+    data class Manifest(val className: String, val name: String, val version: Int, val requiresResources: Boolean)
+
+    fun installed(): Set<String> = directory.listFiles()
+        ?.filter { it.isFile && it.extension == "cs3" && it.nameWithoutExtension.matches(packageIdPattern) }
+        ?.mapTo(sortedSetOf()) { it.nameWithoutExtension }.orEmpty()
+
+    fun file(id: String): File {
+        require(id.matches(packageIdPattern)) { "Invalid extension identifier" }
+        return File(directory, "$id.cs3")
+    }
+
+    fun manifest(file: File): Manifest = ZipFile(file).use { zip ->
+        require(zip.size() <= 2048) { "Extension has too many ZIP entries" }
+        val entries = zip.entries().toList()
+        require(entries.map { it.name }.distinct().size == entries.size) { "Duplicate extension ZIP entries" }
+        val entry = zip.getEntry("manifest.json") ?: error("Extension manifest is missing")
+        val manifest = JSONObject(zip.getInputStream(entry).use { Network.readLimited(it, 65_536) })
+        val className = manifest.optString("pluginClassName")
+        require(className.matches(extensionClass)) { "Missing or invalid plugin class name" }
+        val dex = zip.getEntry("classes.dex")
+        require(dex != null && dex.size in 112..MAX_ARCHIVE_BYTES) { "Missing or invalid classes.dex" }
+        val magic = ByteArray(8).also { bytes ->
+            java.io.DataInputStream(zip.getInputStream(dex)).use { it.readFully(bytes) }
         }
+        require(magic.copyOfRange(0, 4).contentEquals("dex\n".toByteArray()) && magic[7] == 0.toByte()) {
+            "Invalid classes.dex header"
+        }
+        val total = entries.sumOf { it.size.coerceAtLeast(0) }
+        require(total <= MAX_ARCHIVE_BYTES * 3) { "Expanded extension exceeds 90 MiB" }
+        Manifest(className, manifest.optString("name").ifBlank { className.substringAfterLast('.') },
+            manifest.optInt("version"), manifest.optBoolean("requiresResources"))
     }
 
-    suspend fun install(plugin: CloudStreamPlugin, beforeReplace: suspend () -> Unit = {}): String = withContext(Dispatchers.IO) {
-        val url = Network.validateHttps(plugin.downloadUrl)
-        val id = MessageDigest.getInstance("SHA-256").digest(url.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        val destination = File(directory, "$id.cs3")
+    suspend fun download(plugin: CloudStreamPlugin): File = withContext(Dispatchers.IO) {
+        var url = Network.validateHttps(plugin.downloadUrl)
+        check(directory.isDirectory || directory.mkdirs()) { "Could not create extension directory" }
         val temp = File.createTempFile("download_", ".tmp", directory)
         try {
-            var target = url
-            var downloaded = false
-            for (redirect in 0..5) {
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                val connection = URL(target).openConnection() as HttpURLConnection
+            repeat(6) {
+                val connection = URL(url).openConnection() as HttpURLConnection
                 try {
                     connection.connectTimeout = 15000
                     connection.readTimeout = 30000
                     connection.instanceFollowRedirects = false
-                    val code = connection.responseCode
-                    if (code in listOf(301, 302, 303, 307, 308)) {
-                        require(redirect < 5) { "Too many extension redirects" }
-                        target = Network.validateHttps(URL(URL(target), connection.getHeaderField("Location") ?: error("Missing redirect destination")).toString())
-                        continue
-                    }
-                    require(code == 200) { "Extension download failed: HTTP $code" }
-                    require(connection.contentLengthLong <= CloudStreamPackage.MAX_BYTES) { "Extension exceeds 30 MB" }
-                    var size = 0L
-                    connection.inputStream.use { input -> temp.outputStream().use { output ->
-                        val buffer = ByteArray(8192)
-                        while (true) {
-                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            size += count
-                            require(size <= CloudStreamPackage.MAX_BYTES) { "Extension exceeds 30 MB" }
-                            output.write(buffer, 0, count)
+                    when (val code = connection.responseCode) {
+                        301, 302, 303, 307, 308 -> {
+                            val location = connection.getHeaderField("Location") ?: error("Extension redirect has no destination")
+                            url = Network.validateHttps(URL(URL(url), location).toString())
                         }
-                    } }
-                    downloaded = true
-                    break
-                } finally { connection.disconnect() }
+                        200 -> {
+                            require(connection.contentLengthLong <= MAX_ARCHIVE_BYTES) { "Extension exceeds 30 MiB" }
+                            connection.inputStream.use { input ->
+                                temp.outputStream().use { output ->
+                                    check(temp.setReadOnly()) { "Could not secure extension bytecode as read-only" }
+                                    val buffer = ByteArray(8192)
+                                    var size = 0L
+                                    while (true) {
+                                        ensureActive()
+                                        val count = input.read(buffer)
+                                        if (count < 0) break
+                                        size += count
+                                        require(size <= MAX_ARCHIVE_BYTES) { "Extension exceeds 30 MiB" }
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
+                            }
+                            manifest(temp)
+                            return@withContext temp
+                        }
+                        else -> error("Extension download failed: HTTP $code")
+                    }
+                } finally {
+                    connection.disconnect()
+                }
             }
-            check(downloaded) { "Extension was not downloaded" }
-            require(temp.length() > 0) { "Empty extension" }
-            CloudStreamPackage.validate(temp)
-            check(temp.setReadOnly()) { "Could not protect extension code" }
-            beforeReplace()
-            require(temp.renameTo(destination)) { "Could not save extension package" }
-            id
-        } finally { temp.delete() }
+            error("Too many extension redirects")
+        } catch (error: Throwable) {
+            temp.delete()
+            throw error
+        }
     }
 
-    suspend fun uninstall(plugin: CloudStreamPlugin): Boolean = withContext(Dispatchers.IO) {
-        val id = MessageDigest.getInstance("SHA-256").digest(Network.validateHttps(plugin.downloadUrl).toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        File(directory, "$id.cs3").delete()
+    companion object {
+        private const val MAX_ARCHIVE_BYTES = 30L * 1024 * 1024
+        private val packageIdPattern = Regex("[a-f0-9]{64}")
+
+        fun packageId(url: String): String = digest(Network.validateHttps(url))
+        internal fun digest(value: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 }

@@ -1,40 +1,37 @@
-# Batch 5 implementation and verification
+# Batch 5 final integration and verification
 
-Implemented upstream CloudStream v4.5.4 runtime source, Android/portable plugin
-lifecycle, provider/extractor registration and cleanup, package validation and
-bounded HTTPS downloads, updates, persistent provider switches and interrupted-load
-recovery. Added typed discovery/search/details/episode/extraction adapters,
-Media3 transport/subtitle integration, and Settings → Integrations → CloudStream.
-Stremio and Nuvio retain their existing clients and account/settings stores.
+The final branch reconciles this session with remote commit 407785b and preserves
+its CloudStream implementation, Home shelves, source filters, playback and account
+persistence improvements. It adds the independently extracted ABI baseline/checker,
+missing upstream video-action lookup helpers, library logging fixes, a downloadable
+legal extension fixture, and reproducible build evidence and artifacts.
 
-Verification against the delivered source:
+Final source verification:
 
 - Kotlin compilation and dependency resolution: passed.
-- Unit tests: 45 passed, zero failures/errors. Includes existing account,
-  Stremio, catalog, network and anime-filter regression coverage.
-- Android lint: passed with warnings; no checks disabled or baselined.
-- Debug application APK and instrumentation APK: built successfully.
-- APK signature: verified.
-- Binary descriptors and inheritance: 90 selected classes match the official
-  CloudStream v4.5.4 release APK baseline, including default bridges/constructors.
-- Separate legal `.cs3` fixture: compiled and DEX-packaged. Runtime tests compile
-  and cover registration, search-to-stream, episodes, rollback, coexistence and
-  unload/reload. They were NOT executed; the user explicitly requested no emulation.
+- Unit tests: 49 passed; zero failures/errors. Covers account, Stremio, network,
+  catalog/Home, Real-Debrid parsing and anime/source-filter regression tests.
+- Android lint: passed with warnings, no checks disabled or baselined.
+- Debug application and instrumentation APKs: built and signature verified.
+- Binary compatibility: the 40-class baseline check passed. The broader independent
+  provider/network checker also passed; see abi-check-full.txt for member counts.
+- Separate instrumentation fixtures and the downloadable legal .cs3: compiled and
+  DEX-packaged. Instrumentation covers lifecycle/resource loading, registration,
+  search/catalogs/details/episodes/extraction, subtitle/header handoff, enable/disable,
+  reload/uninstall and rollback. These tests were NOT executed on a device.
 
-This is not a claim of live extension compatibility or device-verified Batch 5
-completion. Physical-device playback, actual DEX execution, restart behavior and
-live Stremio/Nuvio/Real-Debrid account regressions remain for device acceptance.
-No account credentials were supplied for live regression tests.
+The user explicitly requested no emulation and will perform device testing.
+No live extension compatibility, actual DEX execution or device playback is claimed.
+Live Stremio/Nuvio/Real-Debrid account regressions require the user's accounts and
+remain unverified. Batch 5 cannot be declared device-verified complete until those
+acceptance checks pass.
 
-The runtime baseline is v4.5.4, not current upstream master. Extensions requiring
-newer API symbols or CloudStream-specific app screens/helpers can be incompatible.
-Video actions register and clean up, but have no Mutiny action picker. DRM,
-torrent/magnet and multi-segment playlist links are not mapped into this adapter.
-Execution is in-process and is not a security sandbox. See
-`docs/CLOUDSTREAM_RUNTIME.md` for the complete limitations and device checklist.
+The runtime baseline is CloudStream v4.5.4. Newer symbols and other app-only screens
+can be incompatible. Video actions register but have no Mutiny action picker. DRM,
+torrent/magnet and multi-segment playlists are outside the adapter. In-process code
+execution is not a security sandbox. See docs/CLOUDSTREAM_RUNTIME.md and
+ docs/CLOUDSTREAM_HOST_COMPATIBILITY.md for the full boundaries and device checklist.
 
-Build evidence: `build.log`, `lint-results-debug.txt`, `unit-tests/`,
-`abi-check.txt`, `apk-signature.txt`. Earlier attempts exposed environment
-JDK/proxy/memory issues and a Compose StateFlow observation lint error; the final
-successful run includes their fixes. Emulator execution was abandoned at the user's
-request, and no emulator tests are represented as passed.
+Evidence: build.log, lint-results-debug.txt, unit-tests/, abi-check.txt,
+abi-check-full.txt and apk-signature.txt. All packaged binaries come from the final
+reconciled source, rather than the earlier pre-reconciliation build.

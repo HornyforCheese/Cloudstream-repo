@@ -1,132 +1,311 @@
 package com.mutinymedia.android.data
 
 import android.content.Context
-import android.content.res.Resources
 import android.content.res.AssetManager
-import com.lagradost.api.setContext
+import android.content.res.Configuration
+import android.content.res.Resources
+import android.content.res.loader.ResourcesLoader
+import android.content.res.loader.ResourcesProvider
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.annotation.RequiresApi
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.plugins.BasePlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.extractorApis
 import dalvik.system.DexClassLoader
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
-import java.lang.ref.WeakReference
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
-/** In-process execution is NOT a security sandbox. Only install extensions you trust. */
+/** Runs explicitly trusted CloudStream extensions in the app process. */
 class CloudStreamHost(context: Context) {
     private val context = context.applicationContext
-    data class ProviderStatus(val packageId: String, val pluginClass: String, val state: State, val detail: String)
-    data class Provider(val id: String, val packageId: String, val name: String, val enabled: Boolean)
-    enum class State { MISSING, INCOMPATIBLE, LOADABLE, ACTIVE, FAILED }
-    private data class Loaded(val plugin: BasePlugin, val loader: ClassLoader, val providers: List<MainAPI>, val status: ProviderStatus, val assets: AssetManager?)
-    companion object {
-        // CloudStream's registries are process global. Serialize lifecycle changes across hosts.
-        private val lock = Mutex()
-        private val loaded = java.util.concurrent.ConcurrentHashMap<String, Loaded>()
-    }
-    private val preferences = this.context.getSharedPreferences("cloudstream_provider_state", Context.MODE_PRIVATE)
-    private val recovery = this.context.getSharedPreferences("cloudstream_initialization_recovery", Context.MODE_PRIVATE)
-    private val directory get() = File(context.filesDir, "cloudstream_extensions")
-    private fun path(id: String): File {
-        require(id.matches(Regex("[a-f0-9]{64}"))) { "Invalid extension identifier" }
-        return File(directory, "$id.cs3")
-    }
-    fun providers(): List<Provider> = loaded.flatMap { (id, extension) ->
-        extension.providers.map { api ->
-            val key = providerId(id, api)
-            Provider(key, id, api.name, preferences.getBoolean(key, true))
-        }
-    }
-    private fun providerId(packageId: String, api: MainAPI): String {
-        val identity = "${api.javaClass.name}|${api.name}|${api.mainUrl}"
-        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-        return "$packageId/$digest"
-    }
-    fun enable(id: String, enabled: Boolean) { preferences.edit().putBoolean(id, enabled).apply() }
-    internal fun api(id: String): MainAPI {
-        require(preferences.getBoolean(id, true)) { "CloudStream provider is disabled" }
-        return loaded[id.substringBefore('/')]?.providers?.firstOrNull { providerId(id.substringBefore('/'), it) == id }
-            ?: error("CloudStream provider is unavailable. Reload its extension in Settings.")
-    }
-    suspend fun inspect(packageId: String): ProviderStatus = withContext(Dispatchers.IO) {
-        lock.withLock {
-            loaded[packageId]?.let { return@withLock it.status }
-            val file = path(packageId)
-            if (!file.isFile) return@withLock ProviderStatus(packageId, "", State.MISSING, "Extension not installed")
-            if (recovery.getBoolean(packageId, false)) return@withLock ProviderStatus(packageId, "", State.FAILED,
-                "Previous initialization was interrupted. Reload to retry, or uninstall this extension.")
-            var className = ""
-            var plugin: BasePlugin? = null
-            var assets: AssetManager? = null
-            try {
-                val manifest = CloudStreamPackage.validate(file)
-                className = manifest.className
-                // Android 14+ refuses dynamically loaded writable code.
-                check(file.setReadOnly()) { "Could not make extension code read-only" }
-                CloudStreamPlayback.initialize()
-                setContext(WeakReference<Any>(context))
-                check(recovery.edit().putBoolean(packageId, true).commit()) { "Could not save initialization recovery state" }
-                val loader = DexClassLoader(file.absolutePath, context.codeCacheDir.absolutePath, null, context.classLoader)
-                val type = loader.loadClass(className)
-                require(BasePlugin::class.java.isAssignableFrom(type)) { "Plugin must extend CloudStream BasePlugin" }
-                plugin = type.getDeclaredConstructor().newInstance() as BasePlugin
-                plugin.filename = file.absolutePath
-                if (manifest.resources) {
-                    require(plugin is Plugin) { "Resource extensions must extend Android Plugin" }
-                    // Match the pinned upstream resource loader: .cs3 need not contain AndroidManifest.xml.
-                    assets = AssetManager::class.java.getDeclaredConstructor().newInstance()
-                    val cookie = AssetManager::class.java.getMethod("addAssetPath", String::class.java)
-                        .invoke(assets, file.absolutePath) as Int
-                    require(cookie != 0) { "Extension resource path could not be loaded" }
-                    @Suppress("DEPRECATION")
-                    val resources = Resources(assets, context.resources.displayMetrics, context.resources.configuration)
-                    plugin.resources = resources
+    private val installer = CloudStreamInstaller(this.context)
+    private val preferences = this.context.getSharedPreferences("cloudstream_lifecycle", Context.MODE_PRIVATE)
+    private val active = mutableMapOf<String, Active>()
+    private val failures = mutableMapOf<String, ProviderStatus>()
+
+    enum class State { MISSING, DISABLED, ACTIVE, FAILED, INCOMPATIBLE }
+
+    data class ProviderStatus(
+        val packageId: String,
+        val pluginClass: String,
+        val state: State,
+        val detail: String,
+        val name: String = pluginClass,
+        val version: Int = 0,
+        val providers: List<String> = emptyList(),
+        val hasSettings: Boolean = false,
+        val supportsCatalog: Boolean = false,
+    )
+
+    internal data class Provider(val key: String, val api: MainAPI)
+
+    private data class Active(
+        val plugin: BasePlugin,
+        val providers: List<Provider>,
+        val manifest: CloudStreamInstaller.Manifest,
+        val releaseResources: () -> Unit,
+    )
+
+    suspend fun restore(): List<ProviderStatus> = locked {
+        installer.installed().map { id ->
+            val file = installer.file(id)
+            recoverBackup(file, backupOf(file))
+            when {
+                preferences.getBoolean("loading:$id", false) -> {
+                    check(preferences.edit().remove("loading:$id").putBoolean("enabled:$id", false).commit())
+                    inspectPackage(id).copy(state = State.FAILED, detail = "Initialization was interrupted. Use Reload to retry.")
+                        .also { failures[id] = it }
                 }
-                if (plugin is Plugin) withContext(Dispatchers.Main) { plugin.load(context) } else plugin.load()
-                val registered = synchronized(APIHolder.allProviders) { APIHolder.allProviders.filter { it.sourcePlugin == file.absolutePath } }
-                registered.forEach { it.init() }
-                val count = synchronized(extractorApis) { extractorApis.count { it.sourcePlugin == file.absolutePath } }
-                require(registered.isNotEmpty() || count > 0) { "Plugin load completed without registering providers or extractors" }
-                val status = ProviderStatus(packageId, className, State.ACTIVE, "Initialized: ${registered.size} providers, $count extractors")
-                loaded[packageId] = Loaded(plugin, loader, registered, status, assets)
-                recovery.edit().remove(packageId).commit()
-                status
-            } catch (e: Throwable) {
-                if (e is VirtualMachineError || e is ThreadDeath) throw e
-                try { plugin?.beforeUnload() } catch (cleanupError: Throwable) {
-                    if (cleanupError is VirtualMachineError || cleanupError is ThreadDeath) throw cleanupError
-                }
-                cleanup(file.absolutePath)
-                assets?.close()
-                recovery.edit().remove(packageId).commit()
-                if (e is CancellationException) throw e
-                ProviderStatus(packageId, className, if (e is LinkageError) State.INCOMPATIBLE else State.FAILED,
-                    "${e.javaClass.simpleName}: " + (if (plugin == null && e is IllegalArgumentException) "${e.message}. " else "") + "initialization failed against CloudStream v4.5.4. Check extension requirements or update the extension.")
+                preferences.getBoolean("enabled:$id", false) -> activate(id)
+                else -> inspectPackage(id)
             }
         }
     }
-    private fun cleanup(filename: String) {
-        val own = synchronized(APIHolder.allProviders) {
-            APIHolder.allProviders.filter { it.sourcePlugin == filename }.also { APIHolder.allProviders.removeAll(it.toSet()) }
+
+    suspend fun inspect(id: String): ProviderStatus = locked { inspectPackage(id) }
+
+    suspend fun install(plugin: CloudStreamPlugin): ProviderStatus = locked {
+        val id = CloudStreamInstaller.packageId(plugin.downloadUrl)
+        val destination = installer.file(id)
+        val backup = backupOf(destination)
+        recoverBackup(destination, backup)
+        val staged = installer.download(plugin)
+        val wasEnabled = preferences.getBoolean("enabled:$id", false)
+        try {
+            val updating = destination.exists()
+            if (updating) Files.createLink(backup.toPath(), destination.toPath())
+            unload(id)
+            move(staged, destination)
+            failures.remove(id)
+            val status = if (!updating || wasEnabled) activate(id) else inspectPackage(id)
+            if (updating && status.state in setOf(State.FAILED, State.INCOMPATIBLE)) {
+                move(backup, destination)
+                if (wasEnabled) activate(id) else failures.remove(id)
+                error("Update rejected (${status.detail}). Previous package restored.")
+            }
+            check(!backup.exists() || backup.delete()) { "Could not finish updating extension" }
+            status
+        } finally {
+            staged.delete()
+            if (backup.exists()) {
+                withContext(NonCancellable) {
+                    unload(id)
+                    move(backup, destination)
+                    if (wasEnabled) activate(id)
+                }
+            }
         }
-        own.forEach(APIHolder::removePluginMapping)
-        synchronized(extractorApis) { extractorApis.removeAll { it.sourcePlugin == filename } }
-        val actions = com.lagradost.cloudstream3.actions.VideoClickActionHolder.allVideoClickActions
-        synchronized(actions) { actions.removeAll { it.sourcePlugin == filename } }
     }
-    suspend fun unload(packageId: String) = withContext(Dispatchers.IO) {
-        lock.withLock {
-            recovery.edit().remove(packageId).commit()
-            val extension = loaded.remove(packageId)
-            try { extension?.plugin?.beforeUnload() }
-            catch (e: Throwable) { if (e is VirtualMachineError || e is ThreadDeath) throw e }
-            finally { cleanup(path(packageId).absolutePath); CloudStreamPlayback.remove(packageId); extension?.assets?.close() }
+
+    suspend fun setEnabled(id: String, enabled: Boolean): ProviderStatus = locked {
+        if (enabled) activate(id) else {
+            installer.file(id)
+            check(preferences.edit().putBoolean("enabled:$id", false).remove("loading:$id").commit())
+            unload(id)
+            failures.remove(id)
+            inspectPackage(id)
         }
     }
-    suspend fun unloadAll() { loaded.keys.toList().forEach { unload(it) } }
+
+    suspend fun reload(id: String): ProviderStatus = locked {
+        installer.file(id)
+        unload(id)
+        activate(id)
+    }
+
+    suspend fun uninstall(id: String) = locked {
+        val file = installer.file(id)
+        val backup = backupOf(file)
+        check(!backup.exists() || backup.delete()) { "Could not remove backup extension" }
+        check(!file.exists() || file.delete()) { "Could not remove extension" }
+        unload(id)
+        failures.remove(id)
+        check(preferences.edit().remove("enabled:$id").remove("loading:$id").commit())
+    }
+
+    suspend fun statuses(): List<ProviderStatus> = locked { installer.installed().map(::inspectPackage) }
+
+    suspend fun openSettings(id: String, activity: Context) = locked {
+        val settings = (active[id]?.plugin as? Plugin)?.openSettings ?: error("No extension settings available")
+        val failure = withContext(Dispatchers.Main.immediate) { pluginCall { settings(activity); true } }
+        check(failure == true) { "Extension settings could not open" }
+    }
+
+    internal suspend fun <T> withProviders(block: suspend (List<Provider>) -> T): T =
+        locked { block(active.values.flatMap { it.providers }) }
+
+    private fun inspectPackage(id: String): ProviderStatus {
+        val file = installer.file(id)
+        if (!file.isFile) return ProviderStatus(id, "", State.MISSING, "Extension not installed")
+        active[id]?.let { return activeStatus(id, it) }
+        failures[id]?.let { return it }
+        return try {
+            val manifest = installer.manifest(file)
+            status(id, manifest, State.DISABLED, "Enable to initialize this extension")
+        } catch (error: Exception) {
+            ProviderStatus(id, "", State.FAILED, error.message ?: "Invalid extension package")
+        }
+    }
+
+    private fun activate(id: String): ProviderStatus {
+        active[id]?.let { return activeStatus(id, it) }
+        failures.remove(id)
+        val inspected = inspectPackage(id)
+        if (inspected.state != State.DISABLED) return inspected
+        val file = installer.file(id)
+        val manifest = installer.manifest(file)
+        check(preferences.edit().putBoolean("loading:$id", true).commit()) { "Could not persist extension recovery state" }
+        var plugin: BasePlugin? = null
+        var releaseResources: () -> Unit = {}
+        val result = try {
+            CloudStreamNetwork.initialize(context)
+            check(file.setReadOnly()) { "Could not secure extension bytecode as read-only" }
+            val loader = DexClassLoader(file.absolutePath, context.codeCacheDir.absolutePath, null, context.classLoader)
+            val entry = loader.loadClass(manifest.className)
+            check(entry.classLoader === loader) { "Entry point must be defined by the extension" }
+            val instance = entry.asSubclass(BasePlugin::class.java).getConstructor().newInstance()
+            plugin = instance
+            instance.filename = file.absolutePath
+            if (instance is Plugin) {
+                if (manifest.requiresResources) {
+                    val resources = pluginResources(file)
+                    instance.resources = resources.first
+                    releaseResources = resources.second
+                }
+                instance.load(context)
+            } else {
+                check(!manifest.requiresResources) { "Resource-bearing extensions must extend Android Plugin" }
+                instance.load()
+            }
+            val providers = synchronized(APIHolder.allProviders) {
+                APIHolder.allProviders.filter { it.sourcePlugin == file.absolutePath }
+            }.map { api ->
+                api.init()
+                Provider("$id.${CloudStreamInstaller.digest(api.javaClass.name + ":" + api.name)}", api)
+            }
+            val extractors = synchronized(extractorApis) { extractorApis.count { it.sourcePlugin == file.absolutePath } }
+            check(providers.isNotEmpty() || extractors > 0) { "Extension registered no providers or extractors" }
+            val loaded = Active(instance, providers, manifest, releaseResources)
+            active[id] = loaded
+            activeStatus(id, loaded)
+        } catch (error: Throwable) {
+            active.remove(id)
+            removeRegistrations(file.absolutePath, plugin, releaseResources)
+            when (error) {
+                is CancellationException, is VirtualMachineError, is ThreadDeath -> throw error
+                is LinkageError, is ClassCastException, is ClassNotFoundException, is NoSuchMethodException ->
+                    status(id, manifest, State.INCOMPATIBLE, "CloudStream v4.5.4 API mismatch (${error.javaClass.simpleName})")
+                else -> status(id, manifest, State.FAILED, "Initialization failed (${error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName})")
+            }
+        }
+        check(preferences.edit().remove("loading:$id").putBoolean("enabled:$id", result.state == State.ACTIVE).commit())
+        if (result.state != State.ACTIVE) failures[id] = result
+        return result
+    }
+
+    private fun unload(id: String) {
+        val loaded = active.remove(id) ?: return
+        removeRegistrations(installer.file(id).absolutePath, loaded.plugin, loaded.releaseResources)
+    }
+
+    private fun removeRegistrations(path: String, plugin: BasePlugin?, releaseResources: () -> Unit) {
+        try {
+            pluginCall { plugin?.beforeUnload() }
+        } finally {
+            synchronized(APIHolder.allProviders) {
+                APIHolder.allProviders.filter { it.sourcePlugin == path }.forEach(APIHolder::removePluginMapping)
+                APIHolder.allProviders.removeAll { it.sourcePlugin == path }
+            }
+            synchronized(extractorApis) { extractorApis.removeAll { it.sourcePlugin == path } }
+            val actions = VideoClickActionHolder.allVideoClickActions
+            synchronized(actions) { actions.removeAll { it.sourcePlugin == path } }
+            (plugin as? Plugin)?.resources = null
+            pluginCall(releaseResources)
+        }
+    }
+
+    private fun activeStatus(id: String, loaded: Active): ProviderStatus {
+        val names = loaded.providers.map { it.api.name }
+        return status(id, loaded.manifest, State.ACTIVE,
+            if (names.isEmpty()) "Extractor extension active" else "${names.size} registered provider(s)")
+            .copy(providers = names, hasSettings = (loaded.plugin as? Plugin)?.openSettings != null,
+                supportsCatalog = loaded.providers.any { pluginCall { it.api.hasMainPage } == true })
+    }
+
+    private fun status(id: String, manifest: CloudStreamInstaller.Manifest, state: State, detail: String) =
+        ProviderStatus(id, manifest.className, state, detail, manifest.name, manifest.version)
+
+    private fun backupOf(file: File) = File(file.parentFile, ".${file.nameWithoutExtension}.backup")
+
+    private fun recoverBackup(file: File, backup: File) {
+        if (backup.exists()) move(backup, file)
+    }
+
+    private fun move(from: File, to: File) {
+        Files.move(from.toPath(), to.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+    }
+
+    private fun pluginResources(file: File): Pair<Resources, () -> Unit> {
+        if (Build.VERSION.SDK_INT >= 30) return pluginResources30(file)
+        @Suppress("DEPRECATION")
+        val assets = AssetManager::class.java.getDeclaredConstructor().newInstance()
+        val cookie = AssetManager::class.java.getMethod("addAssetPath", String::class.java)
+            .invoke(assets, file.absolutePath) as Int
+        if (cookie == 0) {
+            assets.close()
+            error("Could not attach extension resources")
+        }
+        @Suppress("DEPRECATION")
+        return Resources(assets, context.resources.displayMetrics, context.resources.configuration) to { assets.close() }
+    }
+
+    @RequiresApi(30)
+    private fun pluginResources30(file: File): Pair<Resources, () -> Unit> {
+        val provider = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use {
+            ResourcesProvider.loadFromApk(it)
+        }
+        val loader = ResourcesLoader()
+        val resources = context.createConfigurationContext(Configuration(context.resources.configuration)).resources
+        try {
+            loader.addProvider(provider)
+            resources.addLoaders(loader)
+        } catch (error: Exception) {
+            loader.clearProviders()
+            provider.close()
+            throw error
+        }
+        return resources to {
+            resources.removeLoaders(loader)
+            loader.clearProviders()
+            provider.close()
+        }
+    }
+
+    private suspend fun <T> locked(block: suspend () -> T): T =
+        withContext(Dispatchers.IO) { runtimeMutex.withLock { block() } }
+
+    companion object {
+        private val runtimeMutex = Mutex()
+    }
+}
+
+internal inline fun <T> pluginCall(block: () -> T): T? = try {
+    block()
+} catch (error: Throwable) {
+    when (error) {
+        is CancellationException, is VirtualMachineError, is ThreadDeath -> throw error
+        else -> null
+    }
 }

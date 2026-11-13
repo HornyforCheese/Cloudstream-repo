@@ -1,10 +1,10 @@
 # Mutiny Media for Android
 
-Native Kotlin/Jetpack Compose source and a signed debug APK for testing.
+Native Kotlin and Jetpack Compose Android app.
 
-**Downloads:** [APK ZIP and source ZIP](https://github.com/HornyforCheese/Cloudstream-repo/releases/tag/android-debug-2026-11-09).
+**Earlier build:** [APK ZIP and source ZIP](https://github.com/HornyforCheese/Cloudstream-repo/releases/tag/android-debug-2026-11-09).
 
-The build passes, all **16 JVM tests pass**, and Android lint reports **zero errors**. The separate device-test APK also compiles. Runtime device verification remains incomplete because the software emulator's Android system failed before app installation; see [runtime status](RUNTIME_DEBUG.md).
+The CloudStream provider runtime is pinned to v4.5.4. See the [integration, build checks, and physical-device test instructions](docs/CLOUDSTREAM_HOST_COMPATIBILITY.md).
 
 - [Build instructions and features](README_FIRST.md)
 - [Repairs and improvements](FIXES.md)
@@ -17,4 +17,4 @@ Use Android SDK 36 and a full JDK 17 or newer. Build with:
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
 ```
 
-On Windows, use gradlew.bat. Debug APKs are for testing; configure your own signing for release distribution. Nuvio login/sync, executable CloudStream plugins, torrent/debrid playback and account synchronization remain separate integrations.
+On Windows, use gradlew.bat. Debug APKs are for testing; configure your own signing for release distribution. Live provider and playback verification requires a physical device.

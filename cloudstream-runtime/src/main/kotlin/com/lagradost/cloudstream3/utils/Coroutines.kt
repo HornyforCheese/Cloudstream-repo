@@ -5,7 +5,6 @@ import com.lagradost.cloudstream3.mvvm.logError
 import kotlinx.coroutines.*
 import java.util.Collections.synchronizedList
 
-
 object Coroutines {
     fun <T> T.main(work: suspend ((T) -> Unit)): Job {
         val value = this

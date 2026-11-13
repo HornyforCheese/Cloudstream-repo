@@ -15,7 +15,7 @@ abstract class BasePlugin {
      * @param element MainAPI provider you want to register
      */
     fun registerMainAPI(element: MainAPI) {
-        Log.i(PLUGIN_TAG, "Adding ${element.name} MainAPI")
+        Log.i(PLUGIN_TAG, "Adding ${element.name} (${element.mainUrl}) MainAPI")
         element.sourcePlugin = this.filename
         // Race condition causing which would case duplicates if not for distinctBy
         synchronized(APIHolder.allProviders) {
@@ -29,7 +29,7 @@ abstract class BasePlugin {
      * @param element ExtractorApi provider you want to register
      */
     fun registerExtractorAPI(element: ExtractorApi) {
-        Log.i(PLUGIN_TAG, "Adding ${element.name} ExtractorApi")
+        Log.i(PLUGIN_TAG, "Adding ${element.name} (${element.mainUrl}) ExtractorApi")
         element.sourcePlugin = this.filename
         extractorApis.add(element)
     }

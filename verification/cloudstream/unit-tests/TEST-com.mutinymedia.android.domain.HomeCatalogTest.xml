@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.domain.HomeCatalogTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-13T03:57:49.453Z" hostname="cadd27ae0acd" time="0.057">
+  <properties/>
+  <testcase name="ranksByScoreOrReleaseDateAndMergesCatalogMetadata" classname="com.mutinymedia.android.domain.HomeCatalogTest" time="0.054"/>
+  <testcase name="requestedShelvesSeparateAnimeFormatsAndUseActualReleaseYears" classname="com.mutinymedia.android.domain.HomeCatalogTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

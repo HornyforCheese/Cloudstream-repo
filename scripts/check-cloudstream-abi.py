@@ -59,7 +59,11 @@ def read_dex(data):
     for i in range(u32(96)):
         offset = u32(100)+32*i
         name = types[u32(offset)]
-        if name not in SELECTED and not any(name.startswith(s[:-1]+'$') for s in SELECTED): continue
+        # Named API nested types are stable. Lambda/state-machine classes are implementation
+        # details whose names and captures change with compiler/host adaptation.
+        api_nested = ('Companion', 'DefaultImpls', 'Manifest', 'DynamicString', 'StringResource')
+        if name not in SELECTED and not any(name == base[:-1] + '$' + nested + ';'
+                for base in SELECTED for nested in api_nested): continue
         parent = u32(offset+8)
         record = {'super': None if parent == 0xffffffff else types[parent],
                   'interfaces': sorted(typelist(u32(offset+12))), 'fields': [], 'methods': []}

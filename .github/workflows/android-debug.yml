@@ -28,9 +28,12 @@ jobs:
       - name: Check 2 - Android lint
         run: bash ./gradlew :app:lintDebug --stacktrace
       - name: Check 3 - Build APKs
-        run: bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+        run: bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :cloudstream-fixture:packageFixture --stacktrace
       - name: Check upstream provider ABI
-        run: python3 scripts/check-cloudstream-abi.py --baseline cloudstream-runtime/abi-v4.5.4.json --candidate app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          python3 scripts/check-cloudstream-abi.py --baseline cloudstream-runtime/abi-v4.5.4.json --candidate app/build/outputs/apk/debug/app-debug.apk
+          curl -fL https://github.com/recloudstream/cloudstream/releases/download/v4.5.4/4.5.4.apk -o "$RUNNER_TEMP/cloudstream-v4.5.4.apk"
+          python3 tools/check_cloudstream_abi.py "$RUNNER_TEMP/cloudstream-v4.5.4.apk" app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: success()
         with:

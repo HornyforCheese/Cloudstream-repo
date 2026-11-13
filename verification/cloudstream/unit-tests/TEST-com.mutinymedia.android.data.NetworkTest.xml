@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.mutinymedia.android.data.NetworkTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-10T02:42:02.555Z" hostname="f186a78d57fe" time="0.005">
+<testsuite name="com.mutinymedia.android.data.NetworkTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-13T03:57:49.223Z" hostname="cadd27ae0acd" time="0.004">
   <properties/>
   <testcase name="rejectsInvalidAndInsecureUrls" classname="com.mutinymedia.android.data.NetworkTest" time="0.001"/>
   <testcase name="responseLimitUsesBytesAndClosesStream" classname="com.mutinymedia.android.data.NetworkTest" time="0.001"/>

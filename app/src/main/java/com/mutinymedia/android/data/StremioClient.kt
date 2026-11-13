@@ -7,6 +7,7 @@ import com.mutinymedia.android.domain.Episode
 import com.mutinymedia.android.domain.Addon
 import com.mutinymedia.android.domain.MediaItem
 import com.mutinymedia.android.domain.StreamOption
+import com.mutinymedia.android.domain.mergeCatalogTitles
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -67,15 +68,18 @@ class StremioClient(
                 all += MediaItem(mediaId, type, name,
                     m.optString("poster").takeIf { it.startsWith("https://", ignoreCase = true) },
                     m.optString("description").takeIf(String::isNotBlank),
-                    type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"),
+                    m.isAnime(type, mediaId),
                     genres = m.catalogGenres(),
                     year = m.catalogYear(),
                     cast = m.catalogNames("cast"),
+                    rating = m.catalogRating(),
+                    releaseDate = m.catalogReleaseDate(),
+                    catalogFormat = m.optString("type").takeIf { type == "anime" && it in setOf("movie", "series") },
                 )
             }
         }
         if (failures.isNotEmpty() && all.isEmpty()) throw IllegalStateException("All ${failures.size} catalog endpoints failed", failures.first())
-        return all.distinctBy { it.type to it.id }.take(1_000)
+        return mergeCatalogTitles(all).take(1_000)
     }
     /** Fetches full title metadata from an addon without discarding existing poster/description. */
     suspend fun metadata(addon: Addon, media: MediaItem): MediaItem {
@@ -86,10 +90,12 @@ class StremioClient(
         val poster = meta.optString("poster").takeIf { it.startsWith("https://", true) } ?: media.poster
         val description = meta.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: media.description
         return media.copy(title = name, poster = poster, description = description,
-            isAnime = media.isAnime || meta.optString("type") == "anime",
+            isAnime = media.isAnime || meta.isAnime(meta.optString("type"), media.id),
             genres = meta.catalogGenres().ifEmpty { media.genres },
             year = meta.catalogYear() ?: media.year,
             cast = meta.catalogNames("cast").ifEmpty { media.cast },
+            rating = meta.catalogRating() ?: media.rating,
+            releaseDate = meta.catalogReleaseDate() ?: media.releaseDate,
         )
     }
 
@@ -122,9 +128,9 @@ class StremioClient(
             }?.toMap().orEmpty()
             val infoHash = stream.optString("infoHash").trim().takeIf { it.matches(Regex("[a-fA-F0-9]{40}")) }
             val fileIndex = stream.optInt("fileIdx", -1).takeIf { it >= 0 }
-            StreamOption("${addon.id}#$i", title.ifBlank { "Stream ${i+1}" },
+            StreamOption("${addon.id}:${CloudStreamInstaller.digest(addon.baseUrl)}#$i", title.ifBlank { "Stream ${i+1}" },
                 stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers,
-                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex)
+                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex, addonUrl = addon.baseUrl)
         }
     }
 }
@@ -149,3 +155,14 @@ private fun JSONObject.catalogYear(): Int? =
     sequenceOf(optString("year"), optString("releaseInfo"), optString("released"))
         .mapNotNull { releaseYearPattern.find(it)?.value?.toIntOrNull() }
         .firstOrNull()
+
+private fun JSONObject.isAnime(type: String, id: String): Boolean =
+    type.equals("anime", true) || id.startsWith("kitsu:") || id.startsWith("mal:") ||
+        catalogGenres().any { it.equals("anime", true) }
+
+private fun JSONObject.catalogRating(): Double? =
+    sequenceOf("imdbRating", "rating").map { optDouble(it, Double.NaN) }
+        .firstOrNull { it.isFinite() && it > 0.0 && it <= 10.0 }
+
+private fun JSONObject.catalogReleaseDate(): java.time.LocalDate? =
+    runCatching { java.time.LocalDate.parse(optString("released").take(10)) }.getOrNull()

@@ -18,7 +18,7 @@ val MutedInk = Color(0xFFB5A9C8)
 
 private val colors = darkColorScheme(
     primary = NeonPurple,
-    onPrimary = Color.White,
+    onPrimary = DeepPurple,
     secondary = Mint,
     onSecondary = DeepPurple,
     background = DeepPurple,

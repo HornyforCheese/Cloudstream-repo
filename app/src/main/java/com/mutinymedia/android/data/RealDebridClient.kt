@@ -8,11 +8,12 @@ import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.delay
 
-/** Real-Debrid link unrestriction only. Torrent magnet conversion is not supported here. */
-class RealDebridClient {
+/** Resolves HTTPS hoster links and torrent hashes through Real-Debrid. */
+class RealDebridClient internal constructor(private val openConnection: (URL) -> HttpURLConnection) {
+    constructor() : this({ it.openConnection() as HttpURLConnection })
     private suspend fun call(path: String, token: String, form: Map<String, String>? = null): JSONObject = withContext(Dispatchers.IO) {
         require(token.isNotBlank()) { "Enter your Real-Debrid API token" }
-        val connection = (URL("https://api.real-debrid.com/rest/1.0/$path").openConnection() as HttpURLConnection)
+        val connection = openConnection(URL("https://api.real-debrid.com/rest/1.0/$path"))
         try {
             connection.connectTimeout = 12000
             connection.readTimeout = 18000
@@ -46,7 +47,7 @@ class RealDebridClient {
         var info = call("torrents/info/$encodedId", token)
         val files = info.optJSONArray("files") ?: error("Real-Debrid returned no torrent file list")
         require(files.length() > 0) { "The torrent has no files" }
-        val selected = if (fileIndex != null && fileIndex < files.length()) fileIndex else {
+        val selected = if (fileIndex != null && fileIndex in 0 until files.length()) fileIndex else {
             (0 until files.length()).maxByOrNull { files.optJSONObject(it)?.optLong("bytes") ?: 0L } ?: 0
         }
         val fileId = files.optJSONObject(selected)?.optInt("id", -1) ?: -1

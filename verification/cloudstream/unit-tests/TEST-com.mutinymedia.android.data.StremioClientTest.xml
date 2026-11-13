@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.mutinymedia.android.data.StremioClientTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-11-10T02:42:02.581Z" hostname="f186a78d57fe" time="0.117">
+<testsuite name="com.mutinymedia.android.data.StremioClientTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-13T03:57:49.306Z" hostname="cadd27ae0acd" time="0.144">
   <properties/>
-  <testcase name="metadataRetainsExistingTitleWhenProviderOmitsDetails" classname="com.mutinymedia.android.data.StremioClientTest" time="0.01"/>
-  <testcase name="enrichesTitleMetadataAndPreservesFallbackFields" classname="com.mutinymedia.android.data.StremioClientTest" time="0.004"/>
-  <testcase name="catalogDoesNotTruncateAfterFortyTitles" classname="com.mutinymedia.android.data.StremioClientTest" time="0.056"/>
-  <testcase name="inspectUsesExactConfiguredManifestEndpoint" classname="com.mutinymedia.android.data.StremioClientTest" time="0.001"/>
-  <testcase name="normalizesCinemetaAndStremioScheme" classname="com.mutinymedia.android.data.StremioClientTest" time="0.0"/>
-  <testcase name="retainsConfiguredPathAndEncodedSegments" classname="com.mutinymedia.android.data.StremioClientTest" time="0.001"/>
-  <testcase name="searchesCatalogBeyondFifthManifestEntry" classname="com.mutinymedia.android.data.StremioClientTest" time="0.015"/>
+  <testcase name="metadataRetainsExistingTitleWhenProviderOmitsDetails" classname="com.mutinymedia.android.data.StremioClientTest" time="0.016"/>
+  <testcase name="enrichesTitleMetadataAndPreservesFallbackFields" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
+  <testcase name="catalogDoesNotTruncateAfterFortyTitles" classname="com.mutinymedia.android.data.StremioClientTest" time="0.033"/>
+  <testcase name="inspectUsesExactConfiguredManifestEndpoint" classname="com.mutinymedia.android.data.StremioClientTest" time="0.003"/>
+  <testcase name="normalizesCinemetaAndStremioScheme" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
+  <testcase name="retainsConfiguredPathAndEncodedSegments" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
+  <testcase name="searchesCatalogBeyondFifthManifestEntry" classname="com.mutinymedia.android.data.StremioClientTest" time="0.009"/>
   <testcase name="reportsCatalogEndpointFailureWhenNothingCanBeLoaded" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
-  <testcase name="rejectsQueryFragmentsCredentialsAndInsecureSchemes" classname="com.mutinymedia.android.data.StremioClientTest" time="0.001"/>
-  <testcase name="rejectsNonManifestJson" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
-  <testcase name="episodesSortAndUseProviderVideoIds" classname="com.mutinymedia.android.data.StremioClientTest" time="0.006"/>
-  <testcase name="streamHeadersAndUnsupportedSourcesArePreserved" classname="com.mutinymedia.android.data.StremioClientTest" time="0.005"/>
-  <testcase name="searchesEncodedQueryAndPreservesMediaType" classname="com.mutinymedia.android.data.StremioClientTest" time="0.004"/>
+  <testcase name="rejectsQueryFragmentsCredentialsAndInsecureSchemes" classname="com.mutinymedia.android.data.StremioClientTest" time="0.003"/>
+  <testcase name="rejectsNonManifestJson" classname="com.mutinymedia.android.data.StremioClientTest" time="0.001"/>
+  <testcase name="episodesSortAndUseProviderVideoIds" classname="com.mutinymedia.android.data.StremioClientTest" time="0.005"/>
+  <testcase name="capturesCatalogRatingReleaseDateAndAnimeFormat" classname="com.mutinymedia.android.data.StremioClientTest" time="0.009"/>
+  <testcase name="streamHeadersAndUnsupportedSourcesArePreserved" classname="com.mutinymedia.android.data.StremioClientTest" time="0.019"/>
+  <testcase name="searchesEncodedQueryAndPreservesMediaType" classname="com.mutinymedia.android.data.StremioClientTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

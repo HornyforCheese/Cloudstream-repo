@@ -1,13 +1,10 @@
 package com.lagradost.cloudstream3.actions
-import com.lagradost.api.Log
+
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import androidx.core.app.ActivityOptionsCompat
-import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
 import com.lagradost.cloudstream3.ui.result.ResultEpisode
@@ -15,27 +12,17 @@ import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.threadSafeListOf
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.UiText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import java.util.concurrent.Callable
-import java.util.concurrent.FutureTask
 import kotlin.reflect.jvm.jvmName
 
-/** Android application bridge replacing upstream CommonActivity and MainActivity. */
-object PluginActivityBridge {
-    var activity: java.lang.ref.WeakReference<Activity>? = null
-    var launchResult: ((Intent, ActivityOptionsCompat?) -> Unit)? = null
-    fun toast(text: String?, duration: Int) {
-        val current = activity?.get() ?: return
-        current.runOnUiThread { Toast.makeText(current, text, duration).show() }
-    }
-}
 object VideoClickActionHolder {
     val allVideoClickActions = threadSafeListOf<VideoClickAction>()
-
-    init {
-        Log.d("VideoClickActionHolder", "allVideoClickActions: ${allVideoClickActions.map { it.uniqueId() }}")
-    }
+    var activity: WeakReference<Activity>? = null
+    var resultLauncher: ((Intent, ActivityOptionsCompat?) -> Unit)? = null
 
     private const val ACTION_ID_OFFSET = 1000
 
@@ -80,43 +67,21 @@ abstract class VideoClickAction {
      * this is a wrapper for runOnUiThread in a suspended safe context that bubble up exceptions  */
     @Throws
     suspend fun <T> uiThread(callable : Callable<T>) : T? {
-        val future = FutureTask{
-            try {
-                Result.success(callable.call())
-            } catch (t : Throwable) {
-                Result.failure(t)
-            }
-        }
-        PluginActivityBridge.activity?.get()?.runOnUiThread(future) ?: throw ErrorLoadingException("No UI Activity, this should never happened")
-        val result = withContext(Dispatchers.IO) {
-            return@withContext future.get()
-        }
-        return result.getOrThrow()
+        checkNotNull(VideoClickActionHolder.activity?.get()) { "No Mutiny Media activity is attached" }
+        return withContext(Dispatchers.Main.immediate) { callable.call() }
     }
 
-    /** Internally uses activityResultLauncher,
-     * use this when the activity has a result like watched position */
     @Throws
-    suspend fun launchResult(intent : Intent?, options : ActivityOptionsCompat? = null) {
-        if (intent == null) {
-            return
-        }
-
-        uiThread {
-            PluginActivityBridge.launchResult?.invoke(intent, options) ?: throw ErrorLoadingException("No active activity result handler")
+    suspend fun launchResult(intent: Intent?, options: ActivityOptionsCompat? = null) {
+        if (intent != null) uiThread {
+            checkNotNull(VideoClickActionHolder.resultLauncher) { "No activity result launcher is attached" }(intent, options)
         }
     }
 
-    /** Internally uses startActivity, use this when you don't
-     * have any result that needs to be stored when exiting the activity  */
     @Throws
-    suspend fun launch(intent : Intent?, bundle : Bundle? = null) {
-        if (intent == null) {
-            return
-        }
-
-        uiThread {
-            PluginActivityBridge.activity?.get()?.startActivity(intent, bundle) ?: throw ErrorLoadingException("No active Android activity")
+    suspend fun launch(intent: Intent?, bundle: Bundle? = null) {
+        if (intent != null) uiThread {
+            checkNotNull(VideoClickActionHolder.activity?.get()).startActivity(intent, bundle)
         }
     }
 
@@ -150,15 +115,14 @@ abstract class VideoClickAction {
     fun runActionSafe(context: Context?, video: ResultEpisode, result: LinkLoadingResult, index: Int?) = ioSafe {
         try {
             runAction(context, video, result, index)
-        }  catch (_ : NotImplementedError) {
-            PluginActivityBridge.toast("runAction has not been implemented for ${name.asStringNull(context)}, please contact the extension developer of $sourcePlugin", Toast.LENGTH_LONG)
-        } catch (error : ErrorLoadingException) {
-            PluginActivityBridge.toast(error.message, Toast.LENGTH_LONG)
-        } catch (_: ActivityNotFoundException) {
-            PluginActivityBridge.toast("No application can open this action", Toast.LENGTH_LONG)
-        } catch (t : Throwable) {
-            logError(t)
-            PluginActivityBridge.toast(t.toString(), Toast.LENGTH_LONG)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            logError(error)
+        } catch (error: LinkageError) {
+            logError(error)
+        } catch (error: NotImplementedError) {
+            logError(error)
         }
     }
 }
