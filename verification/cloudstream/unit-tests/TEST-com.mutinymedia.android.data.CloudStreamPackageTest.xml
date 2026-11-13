@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.data.CloudStreamPackageTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-11-10T02:42:02.459Z" hostname="f186a78d57fe" time="0.037">
+  <properties/>
+  <testcase name="invalidClassNameIsRejected" classname="com.mutinymedia.android.data.CloudStreamPackageTest" time="0.018"/>
+  <testcase name="missingDexIsRejected" classname="com.mutinymedia.android.data.CloudStreamPackageTest" time="0.004"/>
+  <testcase name="malformedDexIsRejected" classname="com.mutinymedia.android.data.CloudStreamPackageTest" time="0.008"/>
+  <testcase name="supportedHeaderPassesStructuralValidationOnly" classname="com.mutinymedia.android.data.CloudStreamPackageTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

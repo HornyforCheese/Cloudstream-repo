@@ -51,6 +51,8 @@ data class Addon(
     val supportsMeta: Boolean = false,
 )
 
+data class SubtitleOption(val language: String, val url: String)
+
 data class StreamOption(
     val id: String,
     val title: String,
@@ -61,6 +63,8 @@ data class StreamOption(
     val externalUrl: String? = null,
     val infoHash: String? = null,
     val fileIndex: Int? = null,
+    val mimeType: String? = null,
+    val subtitles: List<SubtitleOption> = emptyList(),
 ) {
     val playable: Boolean get() = runCatching {
         val uri = java.net.URI(url ?: return false)

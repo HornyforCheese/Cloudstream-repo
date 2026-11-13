@@ -29,7 +29,7 @@ enum class SettingsTab(val label: String) {
     HOME("Settings"), ACCOUNT("Account"), WATCH_PARTY("Watch party"),
     APPEARANCE("Appearance"), LAYOUT("Layout"),
     CONTENT("Content & Discovery"), PLAYBACK("Playback"),
-    PROVIDERS("Integrations"), TRACKING("Tracking"),
+    PROVIDERS("Integrations"), CLOUDSTREAM("CloudStream"), TRACKING("Tracking"),
     TMDB("TMDB Enrichment"), MDBLIST("MDBList Ratings"),
     OMDB("OMDb Ratings"), LIVE_TV("Live TV"), DISCORD("Discord"),
     LOW_DATA("Low bandwidth"), ANIME("Anime"), AI("Ask AI"),
@@ -37,11 +37,11 @@ enum class SettingsTab(val label: String) {
 }
 
 @Composable
-fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
+fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>, onSelectTitle: (com.mutinymedia.android.domain.MediaItem) -> Unit = { vm.loadStreams(it) }) {
     var tab by rememberSaveable { mutableStateOf(SettingsTab.HOME) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (tab != SettingsTab.HOME) {
-            TextButton(onClick = { tab = if (tab in listOf(SettingsTab.TMDB, SettingsTab.MDBLIST, SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD)) SettingsTab.PROVIDERS else SettingsTab.HOME }) { Text("← Back") }
+            TextButton(onClick = { tab = if (tab in listOf(SettingsTab.CLOUDSTREAM, SettingsTab.TMDB, SettingsTab.MDBLIST, SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD)) SettingsTab.PROVIDERS else SettingsTab.HOME }) { Text("← Back") }
         }
         PanelTitle(tab.label, if (tab == SettingsTab.HOME) "Manage your Mutiny Media preferences and connected services." else "Mutiny Media Android")
         when (tab) {
@@ -71,6 +71,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
             SettingsTab.ACCOUNT -> { StremioAccountCard(vm); NuvioAccountCard(vm) }
             SettingsTab.PROVIDERS -> {
                 MutinyPanel("Integrations") {
+                    SettingsLink("CloudStream", "Extension repositories, installed providers and browsing") { tab = SettingsTab.CLOUDSTREAM }
                     SettingsLink("Connected Services", "Stremio and Nuvio accounts") { tab = SettingsTab.ACCOUNT }
                     SettingsLink("Debrid Services", "Real-Debrid API key and connection") { tab = SettingsTab.DEBRID }
                     SettingsLink("TMDB Enrichment", "Metadata enrichment controls") { tab = SettingsTab.TMDB }
@@ -81,6 +82,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
                 }
                 IntegrationsSettings(vm, s, addons, showAccounts = false)
             }
+            SettingsTab.CLOUDSTREAM -> CloudStreamSettings(vm, s, onSelectTitle)
             SettingsTab.CONTENT -> IntegrationsSettings(vm, s, addons, showAccounts = false)
             SettingsTab.PLAYBACK -> {
                 Text("Playback settings currently available on Android:")
@@ -176,64 +178,9 @@ private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
 @Composable
 private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>, showAccounts: Boolean = true) {
     var addonUrl by remember { mutableStateOf("") }
-    var repoUrl by remember { mutableStateOf("") }
-    var directExtensionUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
-    val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
-    val hostStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
     if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
-    MutinyPanel("CloudStream • repositories") {
-        Text("Add a CloudStream repository, then discover its available extension packages. Executing .cs3 plugins is not yet supported.")
-        OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
-            modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Button(onClick = { vm.addExtensionRepo(repoUrl); repoUrl = "" }, enabled = repoUrl.startsWith("https://") && !busy) { Text("Verify & save repository") }
-        OutlinedTextField(value = directExtensionUrl, onValueChange = { directExtensionUrl = it },
-            label = { Text("Or paste a direct HTTPS .cs3 extension URL") },
-            modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Button(onClick = { vm.installCloudStreamUrl(directExtensionUrl); directExtensionUrl = "" },
-            enabled = directExtensionUrl.trim().startsWith("https://", true) &&
-                directExtensionUrl.trim().substringBefore('?').endsWith(".cs3", true) && !busy) {
-            Text("Download extension from URL")
-        }
-        OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
-            Text("Discover available extensions")
-        }
-        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(onClick = { vm.inspectCloudStreamHost() }, enabled = installedPlugins.isNotEmpty() && !busy) {
-            Text("Check installed extension compatibility")
-        }
-        hostStatuses.forEach { status ->
-            Text("${status.packageId.take(10)}: ${status.state} • ${status.detail}",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        plugins.forEach { plugin ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(plugin.name, fontWeight = FontWeight.SemiBold)
-                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                val pluginId = remember(plugin.downloadUrl) {
-                    java.security.MessageDigest.getInstance("SHA-256").digest(plugin.downloadUrl.toByteArray())
-                        .joinToString("") { "%02x".format(it) }
-                }
-                Text(if (pluginId in installedPlugins) "Package downloaded • runtime not available" else "Not installed",
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (pluginId in installedPlugins) {
-                        OutlinedButton(onClick = { vm.uninstallCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Remove") }
-                    } else {
-                        Button(onClick = { vm.installCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Download extension") }
-                    }
-                }
-            }
-        }
-        s.extensionRepositories.forEach { url ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(url, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                TextButton(onClick = { vm.removeExtensionRepo(url) }) { Text("Remove") }
-            }
-        }
-    }
     MutinyPanel("Stremio • addon protocol") {
         Text("HTTPS manifests, catalogs and direct streams. Add providers manually here or import them from your signed-in account.")
         OutlinedTextField(value = addonUrl, onValueChange = { addonUrl = it },
@@ -395,7 +342,7 @@ private fun AboutSettings() {
     MutinyPanel("Engineering notes") {
         Text("Android min SDK 26 • Android TV/handheld friendly focus targets • responsive layouts")
         Text("Media3 for direct HTTPS MP4/HLS/DASH playback. It cannot run Windows Tauri/Rust modules as-is.")
-        Text("Stremio/Nuvio sign-in and account imports are available under Integrations. Executable CloudStream/Nuvio plugins, P2P engines, background playback and Android TV certification require separate integrations.")
+        Text("Stremio/Nuvio sign-in and account imports are available under Integrations. Executable Nuvio plugins, P2P engines, background playback and Android TV certification require separate integrations.")
     }
 }
 
@@ -417,4 +364,84 @@ private fun DebridSettings(vm: MutinyViewModel) {
         }
         Text("Credentials are encrypted locally with Android Keystore and are never stored in the source repository.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+@Composable
+private fun CloudStreamSettings(vm: MutinyViewModel, s: UserSettings, onSelectTitle: (com.mutinymedia.android.domain.MediaItem) -> Unit) {
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    var repoUrl by remember { mutableStateOf("") }
+    var directExtensionUrl by remember { mutableStateOf("") }
+    val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
+    val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
+    val providers by vm.cloudProviders.collectAsStateWithLifecycle()
+    val hostStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
+    MutinyPanel("CloudStream • repositories") {
+        Text("Install trusted extensions to browse, search and play their providers. Extensions execute inside this app with its permissions; this is not a security sandbox. Runtime baseline: CloudStream v4.5.4.")
+        OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Button(onClick = { vm.addExtensionRepo(repoUrl); repoUrl = "" }, enabled = repoUrl.startsWith("https://") && !busy) { Text("Verify & save repository") }
+        OutlinedTextField(value = directExtensionUrl, onValueChange = { directExtensionUrl = it },
+            label = { Text("Or paste a direct HTTPS .cs3 extension URL") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true)
+        Button(onClick = { vm.installCloudStreamUrl(directExtensionUrl); directExtensionUrl = "" },
+            enabled = directExtensionUrl.trim().startsWith("https://", true) &&
+                directExtensionUrl.trim().substringBefore('?').endsWith(".cs3", true) && !busy) {
+            Text("Install extension from URL")
+        }
+        OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
+            Text("Discover available extensions")
+        }
+        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Initialization status is shown below.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = { vm.inspectCloudStreamHost() }, enabled = installedPlugins.isNotEmpty() && !busy) {
+            Text("Check installed extension compatibility")
+        }
+        hostStatuses.forEach { status ->
+            Text("${status.packageId.take(10)}: ${status.state} • ${status.detail}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { vm.reloadCloudPackage(status.packageId) }, enabled = !busy) { Text("Reload") }
+                TextButton(onClick = { vm.removeCloudPackage(status.packageId) }, enabled = !busy) { Text("Uninstall") }
+            }
+        }
+        providers.forEach { provider ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(provider.name, Modifier.weight(1f))
+                Switch(checked = provider.enabled, onCheckedChange = { vm.enableCloudProvider(provider.id, it) }, enabled = !busy)
+                TextButton(onClick = { vm.browseCloudProvider(provider.id) }, enabled = provider.enabled && !busy) { Text("Browse") }
+            }
+        }
+        Text("Search enabled providers from the main title search. Open results to load metadata, episodes and streams.", style = MaterialTheme.typography.bodySmall)
+        plugins.forEach { plugin ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text(plugin.name, fontWeight = FontWeight.SemiBold)
+                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val pluginId = remember(plugin.downloadUrl) {
+                    java.security.MessageDigest.getInstance("SHA-256").digest(plugin.downloadUrl.toByteArray())
+                        .joinToString("") { "%02x".format(it) }
+                }
+                Text(if (pluginId in installedPlugins) "Package installed • see initialization status" else "Not installed",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (pluginId in installedPlugins) {
+                        OutlinedButton(onClick = { vm.installCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Update / reinstall") }
+                        OutlinedButton(onClick = { vm.uninstallCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Remove") }
+                    } else {
+                        Button(onClick = { vm.installCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Install extension") }
+                    }
+                }
+            }
+        }
+        s.extensionRepositories.forEach { url ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(url, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                TextButton(onClick = { vm.removeExtensionRepo(url) }) { Text("Remove") }
+            }
+        }
+    }
+
+    var query by remember { mutableStateOf("") }
+    val results by vm.cloudBrowserItems.collectAsStateWithLifecycle()
+    OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search enabled CloudStream providers") }, modifier = Modifier.fillMaxWidth())
+    Button(onClick = { vm.searchCloudProviders(query) }, enabled = query.isNotBlank() && !busy) { Text("Search") }
+    CatalogResultRows(results, onSelectTitle, { vm.saveToWatchlist(it) })
 }

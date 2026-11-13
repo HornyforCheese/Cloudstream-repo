@@ -1,7 +1,10 @@
 pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories { google(); mavenCentral() }
+    repositories { google(); mavenCentral(); maven("https://jitpack.io") }
 }
 rootProject.name = "MutinyMediaAndroid"
 include(":app")
+
+include(":cloudstream-runtime")
+include(":cloudstream-fixture")

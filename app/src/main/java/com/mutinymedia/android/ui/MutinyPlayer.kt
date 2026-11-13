@@ -37,11 +37,20 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
         DefaultBandwidthMeter.Builder(context).build()
     }
     val player = remember(stream.url, stream.headers) {
-        val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
+        val cloudClient = if (stream.provider != "Real-Debrid") com.mutinymedia.android.data.CloudStreamPlayback.client(stream.id) else null
+        val http: androidx.media3.datasource.HttpDataSource.Factory = if (cloudClient != null)
+            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(cloudClient).setDefaultRequestProperties(stream.headers)
+        else DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
         ExoPlayer.Builder(context).setTrackSelector(selector)
             .setBandwidthMeter(bandwidthMeter)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))).build().apply {
-            setMediaItem(MediaItem.fromUri(requireNotNull(stream.url)))
+            setMediaItem(MediaItem.Builder().setUri(requireNotNull(stream.url)).setMimeType(stream.mimeType)
+                .setSubtitleConfigurations(stream.subtitles.map { subtitle ->
+                    val path = java.net.URI(subtitle.url).path.orEmpty()
+                    MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(subtitle.url))
+                        .setLabel(subtitle.language)
+                        .setMimeType(if (path.endsWith(".srt", true)) "application/x-subrip" else "text/vtt").build()
+                }).build())
             seekTo(savedPosition)
             prepare()
             playWhenReady = shouldPlay

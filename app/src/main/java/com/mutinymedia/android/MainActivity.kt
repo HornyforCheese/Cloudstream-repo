@@ -26,6 +26,17 @@ private enum class Section(val display: String, val glyph: String) {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pluginActivityLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { }
+    override fun onResume() {
+        super.onResume()
+        com.lagradost.cloudstream3.actions.PluginActivityBridge.activity = java.lang.ref.WeakReference(this)
+        com.lagradost.cloudstream3.actions.PluginActivityBridge.launchResult = { intent, options -> pluginActivityLauncher.launch(intent, options) }
+    }
+    override fun onPause() {
+        com.lagradost.cloudstream3.actions.PluginActivityBridge.activity = null
+        com.lagradost.cloudstream3.actions.PluginActivityBridge.launchResult = null
+        super.onPause()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { MutinyRoot() }
@@ -46,15 +57,16 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
     val availableStreams by vm.streams.collectAsStateWithLifecycle()
-    val playableStreams = remember(availableStreams, settings) {
+    val currentTitle by vm.currentItem.collectAsStateWithLifecycle()
+    val playableStreams = remember(availableStreams, settings, currentTitle?.isAnime) {
         com.mutinymedia.android.domain.StreamFilters.rankForBandwidth(
             com.mutinymedia.android.domain.StreamFilters.filterAnime(
-                availableStreams, vm.currentItem.value?.isAnime == true, settings.animeMode
+                availableStreams, currentTitle?.isAnime == true, settings.animeMode
             ), settings
         ).filter { it.playable }
     }
     var attemptedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
-    LaunchedEffect(vm.currentItem.value?.id) { attemptedSources = emptySet() }
+    LaunchedEffect(currentTitle?.id) { attemptedSources = emptySet() }
     fun nextSource(failed: com.mutinymedia.android.domain.StreamOption) {
         val attempted = attemptedSources + failed.id
         val next = playableStreams.firstOrNull { it.id !in attempted && it.id != failed.id }
@@ -151,7 +163,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                             }
                         }
                         section == Section.AI -> AiScreen(vm, settings)
-                        section == Section.SETTINGS -> SettingsScreen(vm, settings, addons)
+                        section == Section.SETTINGS -> SettingsScreen(vm, settings, addons, onSelectTitle = { showTitleDetails = true; vm.loadStreams(it) })
                     }
                 }
             }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.mutinymedia.android.data.AccountApiTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-10T02:42:01.975Z" hostname="f186a78d57fe" time="0.431">
+  <properties/>
+  <testcase name="nuvioRejectsIdentityMismatchAndAuthFailures" classname="com.mutinymedia.android.data.AccountApiTest" time="0.215"/>
+  <testcase name="nuvioRejectsInsecureOrPrivilegedDiscoveryConfiguration" classname="com.mutinymedia.android.data.AccountApiTest" time="0.096"/>
+  <testcase name="nuvioRespectsProfilePinAndUsesPrimaryAddonSetting" classname="com.mutinymedia.android.data.AccountApiTest" time="0.078"/>
+  <testcase name="nuvioExpiredAccessTokenRefreshesAndVerifiesNewIdentity" classname="com.mutinymedia.android.data.AccountApiTest" time="0.003"/>
+  <testcase name="nuvioRefreshesExpiredSessionAndVerifiesIdentity" classname="com.mutinymedia.android.data.AccountApiTest" time="0.002"/>
+  <testcase name="stremioRejectsFailedOrMalformedAuthentication" classname="com.mutinymedia.android.data.AccountApiTest" time="0.004"/>
+  <testcase name="nuvioDiscoversPublishedConfigurationAndSignsInWithoutSavingPassword" classname="com.mutinymedia.android.data.AccountApiTest" time="0.005"/>
+  <testcase name="stremioImportsOnlyActiveHttpsAddonsAndSavedTitles" classname="com.mutinymedia.android.data.AccountApiTest" time="0.014"/>
+  <testcase name="nuvioRejectsIdentityMismatchAfterRefresh" classname="com.mutinymedia.android.data.AccountApiTest" time="0.001"/>
+  <testcase name="stremioLoginPreservesPasswordAndSeparatesTokenFromUiIdentity" classname="com.mutinymedia.android.data.AccountApiTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
