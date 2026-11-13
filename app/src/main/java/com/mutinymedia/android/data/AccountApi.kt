@@ -116,7 +116,7 @@ class StremioAccountClient(private val transport: AccountTransport = AccountHttp
         return (0 until entries.length()).mapNotNull { index ->
             val item = entries.optJSONObject(index) ?: return@mapNotNull null
             if (item.optBoolean("removed") || item.optBoolean("temp")) null else mediaFromAccount(item,"_id","type","name")
-        }.distinctBy { it.type to it.id }.take(500)
+        }.distinctBy { it.type to it.id }.take(2_000)
     }
     suspend fun logout(session: StremioSession) { call("logout",JSONObject().put("authKey",session.token)) }
 }
@@ -202,13 +202,13 @@ class NuvioAccountAdapter(private val transport: AccountTransport = AccountHttp)
     }
     suspend fun library(session: NuvioSession): List<MediaItem> {
         val all=mutableListOf<MediaItem>()
-        for (offset in 0 until 500 step 100) {
+        for (offset in 0 until 2_000 step 100) {
             val rows=rpc(session,"sync_pull_library",JSONObject().put("p_profile_id",session.profile).put("p_limit",100).put("p_offset",offset)) as? JSONArray
                 ?: throw AccountException("Nuvio returned an invalid library")
             (0 until rows.length()).forEach { i -> rows.optJSONObject(i)?.let { mediaFromAccount(it,"content_id","content_type","name") }?.let(all::add) }
             if(rows.length()<100) break
         }
-        return all.distinctBy { it.type to it.id }.take(500)
+        return all.distinctBy { it.type to it.id }.take(2_000)
     }
     suspend fun logout(session: NuvioSession) { request("POST","${session.server.base}/auth/v1/logout?scope=local",headers(session.server,session.access),JSONObject()) }
 }

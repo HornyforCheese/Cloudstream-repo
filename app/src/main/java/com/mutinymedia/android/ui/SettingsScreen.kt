@@ -7,6 +7,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import com.mutinymedia.android.domain.StreamFilters
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -23,12 +27,8 @@ import com.mutinymedia.android.domain.UserSettings
 import kotlin.math.roundToInt
 
 enum class SettingsTab(val label: String) {
-    HOME("Settings"), ACCOUNT("Account"), WATCH_PARTY("Watch party"),
-    APPEARANCE("Appearance"), LAYOUT("Layout"),
-    CONTENT("Content & Discovery"), PLAYBACK("Playback"),
-    PROVIDERS("Integrations"), TRACKING("Tracking"),
-    TMDB("TMDB Enrichment"), MDBLIST("MDBList Ratings"),
-    OMDB("OMDb Ratings"), LIVE_TV("Live TV"), DISCORD("Discord"),
+    HOME("Settings"), ACCOUNT("Account"), APPEARANCE("Appearance"),
+    CONTENT("Content & Discovery"), PLAYBACK("Playback"), PROVIDERS("Integrations"),
     LOW_DATA("Low bandwidth"), ANIME("Anime"), AI("Ask AI"),
     DOWNLOADS("Downloads"), DEBRID("Debrid Services"), ABOUT("About")
 }
@@ -38,26 +38,27 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
     var tab by rememberSaveable { mutableStateOf(SettingsTab.HOME) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (tab != SettingsTab.HOME) {
-            TextButton(onClick = { tab = if (tab in listOf(SettingsTab.TMDB, SettingsTab.MDBLIST, SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD)) SettingsTab.PROVIDERS else SettingsTab.HOME }) { Text("← Back") }
+            TextButton(onClick = { tab = when (tab) {
+                SettingsTab.DEBRID -> SettingsTab.PROVIDERS
+                SettingsTab.LOW_DATA, SettingsTab.ANIME -> SettingsTab.PLAYBACK
+                else -> SettingsTab.HOME
+            } }) { Text("← Back") }
         }
         PanelTitle(tab.label, if (tab == SettingsTab.HOME) "Manage your Mutiny Media preferences and connected services." else "Mutiny Media Android")
         when (tab) {
             SettingsTab.HOME -> {
                 MutinyPanel("Account & social") {
                     SettingsLink("Account", "Stremio and Nuvio sign-in and sync status") { tab = SettingsTab.ACCOUNT }
-                    SettingsLink("Watch party", "Join friends with a party code") { tab = SettingsTab.WATCH_PARTY }
                 }
                 MutinyPanel("Personalisation") {
-                    SettingsLink("Appearance", "Theme Studio, colours and fonts") { tab = SettingsTab.APPEARANCE }
-                    SettingsLink("Layout", "Home, cards, details, streams and navigation") { tab = SettingsTab.LAYOUT }
+                    SettingsLink("Appearance", "Colour presets and fonts") { tab = SettingsTab.APPEARANCE }
                 }
                 MutinyPanel("Content") {
                     SettingsLink("Content & Discovery", "Manage addons and discovery sources") { tab = SettingsTab.CONTENT }
-                    SettingsLink("Playback", "Player, subtitles and auto-play") { tab = SettingsTab.PLAYBACK }
+                    SettingsLink("Playback", "Source filters, subtitles and low bandwidth") { tab = SettingsTab.PLAYBACK }
                 }
                 MutinyPanel("Connections") {
-                    SettingsLink("Integrations", "Streaming, debrid, metadata, Live TV and Discord") { tab = SettingsTab.PROVIDERS }
-                    SettingsLink("Tracking", "Tracking providers and watch progress") { tab = SettingsTab.TRACKING }
+                    SettingsLink("Integrations", "Streaming addons, extensions and Real-Debrid") { tab = SettingsTab.PROVIDERS }
                 }
                 MutinyPanel("More") {
                     SettingsLink("Ask AI", "OpenRouter recommendations") { tab = SettingsTab.AI }
@@ -70,20 +71,15 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
                 MutinyPanel("Integrations") {
                     SettingsLink("Connected Services", "Stremio and Nuvio accounts") { tab = SettingsTab.ACCOUNT }
                     SettingsLink("Debrid Services", "Real-Debrid API key and connection") { tab = SettingsTab.DEBRID }
-                    SettingsLink("TMDB Enrichment", "Metadata enrichment controls") { tab = SettingsTab.TMDB }
-                    SettingsLink("MDBList Ratings", "External ratings providers") { tab = SettingsTab.MDBLIST }
-                    SettingsLink("OMDb Ratings", "Personal API key for IMDb episode ratings") { tab = SettingsTab.OMDB }
-                    SettingsLink("Live TV", "M3U playlists for live channels") { tab = SettingsTab.LIVE_TV }
-                    SettingsLink("Discord", "Show what you're watching on Discord") { tab = SettingsTab.DISCORD }
                 }
                 IntegrationsSettings(vm, s, addons, showAccounts = false)
             }
             SettingsTab.CONTENT -> IntegrationsSettings(vm, s, addons, showAccounts = false)
             SettingsTab.PLAYBACK -> {
-                Text("Playback settings currently available on Android:")
+                ExactResolutionSettings(vm, s)
                 SettingsLink("Low bandwidth", "Bitrate, resolution and codec preferences") { tab = SettingsTab.LOW_DATA }
                 SettingsLink("Anime audio", "Dub/sub stream filters") { tab = SettingsTab.ANIME }
-                Text("Subtitle selection and auto-play controls are not yet implemented.")
+                Text("CloudStream subtitles can be selected in the player when tracks are available.")
             }
             SettingsTab.LOW_DATA -> BandwidthSettings(vm, s)
             SettingsTab.ANIME -> AnimeSettings(vm, s)
@@ -92,13 +88,7 @@ fun SettingsScreen(vm: MutinyViewModel, s: UserSettings, addons: List<Addon>) {
             SettingsTab.DOWNLOADS -> DirectDownloadSettings(vm)
             SettingsTab.ABOUT -> AboutSettings()
             SettingsTab.APPEARANCE -> ThemeStudioSettings(vm, s)
-            SettingsTab.WATCH_PARTY, SettingsTab.LAYOUT,
-            SettingsTab.TRACKING, SettingsTab.TMDB, SettingsTab.MDBLIST,
-            SettingsTab.OMDB, SettingsTab.LIVE_TV, SettingsTab.DISCORD -> {
-                MutinyPanel(tab.label) {
-                    Text("This integration or settings module is not implemented in the Android app yet. It is listed here to match the requested settings structure, but no connection or feature is claimed.")
-                }
-            }
+
         }
     }
 }
@@ -114,13 +104,13 @@ private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
             ThemePreset.entries.forEach { preset ->
                 FilterChip(
                     selected = settings.themePreset == preset,
-                    onClick = { vm.runJob { vm.store.setThemePreset(preset) } },
+                    onClick = { if (settings.themePreset != preset) vm.runJob { vm.store.setThemePreset(preset) } },
                     label = { Text(preset.label) },
                 )
             }
         }
-        OutlinedButton(onClick = { vm.runJob { vm.store.randomizeThemePreset() } }) {
-            Text("Randomise theme")
+        OutlinedButton(onClick = { vm.runJob { vm.store.randomizeAppearance() } }) {
+            Text("Randomise colours and font")
         }
         Text("App font", style = MaterialTheme.typography.titleSmall)
         Row(
@@ -130,7 +120,7 @@ private fun ThemeStudioSettings(vm: MutinyViewModel, settings: UserSettings) {
             ThemeFont.entries.forEach { font ->
                 FilterChip(
                     selected = settings.themeFont == font,
-                    onClick = { vm.runJob { vm.store.setThemeFont(font) } },
+                    onClick = { if (settings.themeFont != font) vm.runJob { vm.store.setThemeFont(font) } },
                     label = { Text(font.label) },
                 )
             }
@@ -155,12 +145,12 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
     var directExtensionUrl by remember { mutableStateOf("") }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val plugins by vm.cloudStreamPlugins.collectAsStateWithLifecycle()
-    val installedPlugins by vm.installedCloudPlugins.collectAsStateWithLifecycle()
+    val extensionContext = androidx.compose.ui.platform.LocalContext.current
     val hostStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
     PanelTitle("Streaming providers", "Sign in to Stremio or Nuvio, or connect streaming addons manually.")
     if (showAccounts) { StremioAccountCard(vm); NuvioAccountCard(vm) }
     MutinyPanel("CloudStream • repositories") {
-        Text("Add a CloudStream repository, then discover its available extension packages. Executing .cs3 plugins is not yet supported.")
+        Text("Install extensions only from sources you trust. CloudStream extensions run with this app’s permissions. Active providers appear in Browse and Search.")
         OutlinedTextField(value = repoUrl, onValueChange = { repoUrl = it }, label = { Text("HTTPS CloudStream repo.json") },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
         Button(onClick = { vm.addExtensionRepo(repoUrl); repoUrl = "" }, enabled = repoUrl.startsWith("https://") && !busy) { Text("Verify & save repository") }
@@ -170,36 +160,41 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
         Button(onClick = { vm.installCloudStreamUrl(directExtensionUrl); directExtensionUrl = "" },
             enabled = directExtensionUrl.trim().startsWith("https://", true) &&
                 directExtensionUrl.trim().substringBefore('?').endsWith(".cs3", true) && !busy) {
-            Text("Download extension from URL")
+            Text("Install extension from URL")
         }
         OutlinedButton(onClick = { vm.discoverCloudStreamPlugins() }, enabled = s.extensionRepositories.isNotEmpty() && !busy) {
             Text("Discover available extensions")
         }
-        if (plugins.isNotEmpty()) Text("${plugins.size} extension packages found. Installation and execution require a compatible runtime.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(onClick = { vm.inspectCloudStreamHost() }, enabled = installedPlugins.isNotEmpty() && !busy) {
-            Text("Check installed extension compatibility")
-        }
         hostStatuses.forEach { status ->
-            Text("${status.packageId.take(10)}: ${status.state} • ${status.detail}",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val active = status.state == com.mutinymedia.android.data.CloudStreamHost.State.ACTIVE
+            Text(status.name.ifBlank { status.packageId.take(10) }, fontWeight = FontWeight.SemiBold)
+            Text("${status.state} · ${status.detail}", style = MaterialTheme.typography.bodySmall)
+            if (status.providers.isNotEmpty()) Text(status.providers.joinToString(), style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.setCloudStreamEnabled(status.packageId, !active) }, enabled = !busy) {
+                    Text(if (active) "Disable" else "Enable")
+                }
+                OutlinedButton(onClick = { vm.reloadCloudStreamPlugin(status.packageId) }, enabled = !busy) { Text("Reload") }
+                if (status.hasSettings) {
+                    OutlinedButton(onClick = { vm.openCloudStreamSettings(status.packageId, extensionContext) }, enabled = !busy) {
+                        Text("Settings")
+                    }
+                }
+                TextButton(onClick = { vm.uninstallCloudStreamPlugin(status.packageId) }, enabled = !busy) { Text("Uninstall") }
+            }
         }
         plugins.forEach { plugin ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text(plugin.name, fontWeight = FontWeight.SemiBold)
-                Text("Version ${plugin.version} • ${plugin.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Version ${plugin.version} · ${plugin.description}", style = MaterialTheme.typography.bodySmall)
                 val pluginId = remember(plugin.downloadUrl) {
-                    java.security.MessageDigest.getInstance("SHA-256").digest(plugin.downloadUrl.toByteArray())
-                        .joinToString("") { "%02x".format(it) }
+                    com.mutinymedia.android.data.CloudStreamInstaller.packageId(plugin.downloadUrl)
                 }
-                Text(if (pluginId in installedPlugins) "Package downloaded • runtime not available" else "Not installed",
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (pluginId in installedPlugins) {
-                        OutlinedButton(onClick = { vm.uninstallCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Remove") }
-                    } else {
-                        Button(onClick = { vm.installCloudStreamPlugin(plugin) }, enabled = !busy) { Text("Download extension") }
-                    }
-                }
+                val installed = hostStatuses.firstOrNull { it.packageId == pluginId }
+                Button(
+                    onClick = { vm.installCloudStreamPlugin(plugin) },
+                    enabled = !busy && (installed == null || plugin.version == 0 || plugin.version > installed.version),
+                ) { Text(if (installed == null) "Install" else "Update") }
             }
         }
         s.extensionRepositories.forEach { url ->
@@ -216,17 +211,43 @@ private fun IntegrationsSettings(vm: MutinyViewModel, s: UserSettings, addons: L
         Button(onClick = { vm.addAddon(addonUrl); addonUrl = "" }, enabled = (addonUrl.trim().startsWith("https://", true) || addonUrl.trim().startsWith("stremio://", true)) && !busy) { Text("Connect add-on") }
         OutlinedButton(onClick = { vm.refreshAddons() }, enabled = !busy && s.addonUrls.isNotEmpty()) { Text("Retry saved addons") }
         if (s.addonUrls.isEmpty()) Text("No Stremio addons installed", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        s.addonUrls.forEach { url ->
+        Text("Addons are tried in this order when sources otherwise rank equally.", style = MaterialTheme.typography.bodySmall)
+        s.addonUrls.forEachIndexed { index, url ->
             val live = addons.firstOrNull { it.baseUrl == url }
+            val enabled = url !in s.excludedAddonUrls
             Column(Modifier.fillMaxWidth().padding(top = 5.dp)) {
-                Text(live?.title ?: url, fontWeight = FontWeight.SemiBold)
-                Text(if (live != null) "Manifest verified • catalog=${live.supportsCatalog} • stream=${live.supportsStreams}" else "Not reachable or invalid manifest", color = if (live != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(url, modifier = Modifier.weight(1f), maxLines = 2, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { vm.removeAddon(url) }) { Text("Remove") }
+                Text(live?.title ?: runCatching { java.net.URI(url).host }.getOrNull() ?: "Saved addon", fontWeight = FontWeight.SemiBold)
+                Text(when {
+                    !enabled -> "Excluded from discovery and playback"
+                    live != null -> "Manifest verified • catalog=${live.supportsCatalog} • stream=${live.supportsStreams}"
+                    else -> "Manifest unavailable"
+                }, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { vm.setAddonEnabled(url, !enabled) }, enabled = !busy) {
+                        Text(if (enabled) "Exclude" else "Enable")
+                    }
+                    TextButton(onClick = { vm.runJob { vm.store.moveAddon(url, -1) } }, enabled = !busy && index > 0) { Text("Move up") }
+                    TextButton(onClick = { vm.runJob { vm.store.moveAddon(url, 1) } }, enabled = !busy && index < s.addonUrls.lastIndex) { Text("Move down") }
+                    TextButton(onClick = { vm.removeAddon(url) }, enabled = !busy) { Text("Remove") }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExactResolutionSettings(vm: MutinyViewModel, settings: UserSettings) {
+    var open by remember { mutableStateOf(false) }
+    MutinyPanel("Exact source resolution") {
+        Text("Matches provider labels and declared quality. Sources with unknown or conflicting labels are hidden when a resolution is selected.")
+        Box {
+            OutlinedButton(onClick = { open = true }) { Text(settings.exactResolution?.let { "${it}p only" } ?: "Any resolution") }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                (listOf<Int?>(null) + StreamFilters.resolutions).forEach { height ->
+                    DropdownMenuItem(text = { Text(height?.let { "${it}p only" } ?: "Any resolution") },
+                        onClick = { open = false; vm.runJob { vm.store.setExactResolution(height) } })
+                }
             }
         }
     }
@@ -301,12 +322,21 @@ private fun AnimeSettings(vm: MutinyViewModel, s: UserSettings) {
                 }, modifier = Modifier.weight(1f))
             }
         }
-        Text("Only applies to titles marked as anime. Unlabelled results are excluded in Dub/Sub mode rather than misidentified. Dual-audio releases may qualify for both.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Dual audio only", Modifier.weight(1f))
+            Switch(s.animeDualAudioOnly, onCheckedChange = { vm.runJob { vm.store.setDualAudioOnly(it) } })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Uncensored / uncut only", Modifier.weight(1f))
+            Switch(s.animeUncensoredOnly, onCheckedChange = { vm.runJob { vm.store.setUncensoredOnly(it) } })
+        }
+        Text("Only applies to anime. Filters use labels supplied by the provider, and a dual-audio label alone does not identify an English dub.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun AiSettings(vm: MutinyViewModel, s: UserSettings) {
+    val context = LocalContext.current
     var key by remember { mutableStateOf("") }
     var model by remember(s.openRouterModel) { mutableStateOf(s.openRouterModel) }
     var modelMenuOpen by remember { mutableStateOf(false) }
@@ -321,6 +351,10 @@ private fun AiSettings(vm: MutinyViewModel, s: UserSettings) {
             Button(onClick = { vm.saveOpenRouterKey(key); key = "" }, enabled = key.isNotBlank()) { Text("Save key") }
             OutlinedButton(onClick = { vm.saveOpenRouterKey("") }) { Text("Clear key") }
         }
+        TextButton(onClick = {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://openrouter.ai/settings/keys"))) }
+                .onFailure { vm.report("No browser is available to open OpenRouter.") }
+        }) { Text("Get an OpenRouter key") }
         OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text("Model ID") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { vm.runJob { vm.store.setModel(model) } }, enabled = model.isNotBlank()) { Text("Save model") }
         OutlinedButton(onClick = { vm.refreshOpenRouterModels() }, enabled = !busy) {
@@ -370,7 +404,7 @@ private fun AboutSettings() {
     MutinyPanel("Engineering notes") {
         Text("Android min SDK 26 • Android TV/handheld friendly focus targets • responsive layouts")
         Text("Media3 for direct HTTPS MP4/HLS/DASH playback. It cannot run Windows Tauri/Rust modules as-is.")
-        Text("Stremio/Nuvio sign-in and account imports are available under Integrations. Executable CloudStream/Nuvio plugins, P2P engines, background playback and Android TV certification require separate integrations.")
+        Text("Stremio/Nuvio sign-in and account imports are available under Integrations. CloudStream providers use the v4.5.4 runtime. Nuvio plugin execution, P2P engines, background playback and Android TV certification require separate integrations.")
     }
 }
 
@@ -381,7 +415,7 @@ private fun DebridSettings(vm: MutinyViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val saved = remember(account, busy) { vm.secrets.readSecret("debrid_real_debrid") != null }
     MutinyPanel("Real-Debrid") {
-        Text("Resolve supported HTTPS hoster links through your own Real-Debrid account. Torrent magnets and cached torrent conversion are not supported yet.")
+        Text("Use your Real-Debrid account to resolve supported HTTPS hoster links or torrent hashes returned by an addon.")
         Text(if (account != null) "Connected: $account" else if (saved) "API key saved (not verified in this session)" else "No API key saved", color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Real-Debrid API token") },
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)

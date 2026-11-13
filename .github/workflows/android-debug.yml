@@ -2,7 +2,7 @@ name: Android debug build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, fix/android-stremio-manifest-loading]
   pull_request:
 jobs:
   build:
@@ -23,11 +23,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-      - name: Unit tests, lint and APKs
-        run: bash ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Check 1 - Unit tests
+        run: bash ./gradlew :app:testDebugUnitTest --stacktrace
+      - name: Check 2 - Android lint
+        run: bash ./gradlew :app:lintDebug --stacktrace
+      - name: Check 3 - Build APKs
+        run: bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :cloudstream-fixture:packageFixture --stacktrace
+      - name: Check upstream provider ABI
+        run: |
+          python3 scripts/check-cloudstream-abi.py --baseline cloudstream-runtime/abi-v4.5.4.json --candidate app/build/outputs/apk/debug/app-debug.apk
+          curl -fL https://github.com/recloudstream/cloudstream/releases/download/v4.5.4/4.5.4.apk -o "$RUNNER_TEMP/cloudstream-v4.5.4.apk"
+          python3 tools/check_cloudstream_abi.py "$RUNNER_TEMP/cloudstream-v4.5.4.apk" app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: MutinyMedia-Android-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
+            cloudstream-fixture/build/fixture-assets/*.cs3
           if-no-files-found: error

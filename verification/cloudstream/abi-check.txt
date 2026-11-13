@@ -1,0 +1,1 @@
+PASS: 40 classes preserve upstream public/protected descriptors and inheritance

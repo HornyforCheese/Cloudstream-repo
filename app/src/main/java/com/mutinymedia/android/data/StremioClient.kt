@@ -7,6 +7,7 @@ import com.mutinymedia.android.domain.Episode
 import com.mutinymedia.android.domain.Addon
 import com.mutinymedia.android.domain.MediaItem
 import com.mutinymedia.android.domain.StreamOption
+import com.mutinymedia.android.domain.mergeCatalogTitles
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,18 +17,21 @@ class StremioClient(
 ) {
     private suspend fun fetch(url: String, limit: Int = 2_000_000) = fetchJson(url, limit)
     private fun encode(value: String) = URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+    /** Preserve configured addon paths and reject ambiguous manifest URLs. */
     fun normalizeBase(input: String): String {
         val raw = input.trim().replace(Regex("^stremio://", RegexOption.IGNORE_CASE), "https://")
         require(raw.startsWith("https://", ignoreCase = true)) { "Paste an HTTPS add-on manifest URL" }
-        val cleaned = raw.trimEnd('/').removeSuffix("/manifest.json")
-        require(!cleaned.contains('?') && cleaned.length < 2000) { "Invalid add-on URL" }
-        val uri = URI(cleaned)
-        require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.fragment == null) { "Invalid add-on URL" }
-        return cleaned
+        val uri = URI(raw)
+        require(!uri.host.isNullOrBlank() && uri.userInfo == null && uri.rawQuery == null && uri.rawFragment == null) { "Invalid add-on URL" }
+        require(raw.length < 2000) { "Add-on URL is too long" }
+        val path = uri.rawPath.orEmpty().trimEnd('/')
+        val basePath = if (path.endsWith("/manifest.json", ignoreCase = true)) path.dropLast("/manifest.json".length) else path
+        return (uri.scheme.lowercase() + "://" + uri.rawAuthority + basePath).trimEnd('/')
     }
+    fun manifestUrl(input: String): String = normalizeBase(input) + "/manifest.json"
     suspend fun inspectAddon(url: String): Addon {
         val base = normalizeBase(url)
-        val json = fetch("$base/manifest.json", 500_000)
+        val json = fetch(manifestUrl(url), 500_000)
         require(json.optString("id").isNotBlank() && json.optString("name").isNotBlank() && json.has("resources")) { "Invalid Stremio manifest" }
         val id = json.optString("id").ifBlank { base }
         val resources = json.optJSONArray("resources") ?: JSONArray()
@@ -42,7 +46,8 @@ class StremioClient(
         val manifest = fetch("${addon.baseUrl}/manifest.json", 500_000)
         val specs = manifest.optJSONArray("catalogs") ?: return emptyList()
         val all = mutableListOf<MediaItem>()
-        for (index in 0 until minOf(specs.length(), 30)) {
+        val failures = mutableListOf<Exception>()
+        for (index in 0 until minOf(specs.length(), 100)) {
             val spec = specs.optJSONObject(index) ?: continue
             val type = spec.optString("type")
             val id = spec.optString("id")
@@ -53,24 +58,28 @@ class StremioClient(
             val required = (0 until extra.length()).mapNotNull { extra.optJSONObject(it) }.filter { it.optBoolean("isRequired") }.map { it.optString("name") }
             if (required.any { it != "search" || query.isNullOrBlank() }) continue
             val slug = if (query.isNullOrBlank()) "" else "/search=${encode(query.trim())}"
-            val data = try { fetch("${addon.baseUrl}/catalog/${encode(type)}/${encode(id)}$slug.json") } catch (e: CancellationException) { throw e } catch (_: Exception) { continue }
+            val data = try { fetch("${addon.baseUrl}/catalog/${encode(type)}/${encode(id)}$slug.json") } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e; continue }
             val metas = data.optJSONArray("metas") ?: continue
-            for (j in 0 until minOf(metas.length(), 40)) {
+            for (j in 0 until minOf(metas.length(), 100)) {
                 val m = metas.optJSONObject(j) ?: continue
                 val mediaId = m.optString("id")
                 val name = m.optString("name")
                 if (mediaId.isBlank() || name.isBlank()) continue
                 all += MediaItem(mediaId, type, name,
-                    m.optString("poster").takeIf(String::isNotBlank),
+                    m.optString("poster").takeIf { it.startsWith("https://", ignoreCase = true) },
                     m.optString("description").takeIf(String::isNotBlank),
-                    type == "anime" || mediaId.startsWith("kitsu:") || mediaId.startsWith("mal:"),
+                    m.isAnime(type, mediaId),
                     genres = m.catalogGenres(),
                     year = m.catalogYear(),
                     cast = m.catalogNames("cast"),
+                    rating = m.catalogRating(),
+                    releaseDate = m.catalogReleaseDate(),
+                    catalogFormat = m.optString("type").takeIf { type == "anime" && it in setOf("movie", "series") },
                 )
             }
         }
-        return all.distinctBy { it.type to it.id }.take(300)
+        if (failures.isNotEmpty() && all.isEmpty()) throw IllegalStateException("All ${failures.size} catalog endpoints failed", failures.first())
+        return mergeCatalogTitles(all).take(1_000)
     }
     /** Fetches full title metadata from an addon without discarding existing poster/description. */
     suspend fun metadata(addon: Addon, media: MediaItem): MediaItem {
@@ -81,10 +90,12 @@ class StremioClient(
         val poster = meta.optString("poster").takeIf { it.startsWith("https://", true) } ?: media.poster
         val description = meta.optString("description").takeIf { it.isNotBlank() && it != "null" } ?: media.description
         return media.copy(title = name, poster = poster, description = description,
-            isAnime = media.isAnime || meta.optString("type") == "anime",
+            isAnime = media.isAnime || meta.isAnime(meta.optString("type"), media.id),
             genres = meta.catalogGenres().ifEmpty { media.genres },
             year = meta.catalogYear() ?: media.year,
             cast = meta.catalogNames("cast").ifEmpty { media.cast },
+            rating = meta.catalogRating() ?: media.rating,
+            releaseDate = meta.catalogReleaseDate() ?: media.releaseDate,
         )
     }
 
@@ -92,7 +103,7 @@ class StremioClient(
         if (!addon.supportsMeta) return emptyList()
         val data = fetch("${addon.baseUrl}/meta/${encode(media.type)}/${encode(media.id)}.json")
         val videos = data.optJSONObject("meta")?.optJSONArray("videos") ?: return emptyList()
-        return (0 until minOf(videos.length(), 2000)).mapNotNull { index ->
+        return (0 until minOf(videos.length(), 5_000)).mapNotNull { index ->
             val video = videos.optJSONObject(index) ?: return@mapNotNull null
             val id = video.optString("id").takeIf(String::isNotBlank) ?: return@mapNotNull null
             Episode(id, video.optString("title").ifBlank { video.optString("name", id) },
@@ -105,7 +116,7 @@ class StremioClient(
         require(type in listOf("movie", "series", "anime")) { "Unsupported media type" }
         val data = fetch("${addon.baseUrl}/stream/${encode(type)}/${encode(id)}.json", 3_000_000)
         val entries = data.optJSONArray("streams") ?: return emptyList()
-        return (0 until minOf(entries.length(), 120)).mapNotNull { i ->
+        return (0 until minOf(entries.length(), 300)).mapNotNull { i ->
             val stream = entries.optJSONObject(i) ?: return@mapNotNull null
             val title = listOf(stream.optString("name"), stream.optString("title")).filter(String::isNotBlank).joinToString(" · ")
             val fileName = stream.optJSONObject("behaviorHints")?.optString("filename")
@@ -115,8 +126,11 @@ class StremioClient(
                 val value = requestHeaders.optString(key)
                 if (key.contains('\r') || key.contains('\n') || value.contains('\r') || value.contains('\n')) null else key to value
             }?.toMap().orEmpty()
-            StreamOption("${addon.id}#$i", title.ifBlank { "Stream ${i+1}" },
-                stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers, stream.optString("externalUrl").takeIf { it.startsWith("https://", true) })
+            val infoHash = stream.optString("infoHash").trim().takeIf { it.matches(Regex("[a-fA-F0-9]{40}")) }
+            val fileIndex = stream.optInt("fileIdx", -1).takeIf { it >= 0 }
+            StreamOption("${addon.id}:${CloudStreamInstaller.digest(addon.baseUrl)}#$i", title.ifBlank { "Stream ${i+1}" },
+                stream.optString("url").takeIf { it.startsWith("https://", true) }, addon.title, fileName, headers,
+                stream.optString("externalUrl").takeIf { it.startsWith("https://", true) }, infoHash, fileIndex, addonUrl = addon.baseUrl)
         }
     }
 }
@@ -141,3 +155,14 @@ private fun JSONObject.catalogYear(): Int? =
     sequenceOf(optString("year"), optString("releaseInfo"), optString("released"))
         .mapNotNull { releaseYearPattern.find(it)?.value?.toIntOrNull() }
         .firstOrNull()
+
+private fun JSONObject.isAnime(type: String, id: String): Boolean =
+    type.equals("anime", true) || id.startsWith("kitsu:") || id.startsWith("mal:") ||
+        catalogGenres().any { it.equals("anime", true) }
+
+private fun JSONObject.catalogRating(): Double? =
+    sequenceOf("imdbRating", "rating").map { optDouble(it, Double.NaN) }
+        .firstOrNull { it.isFinite() && it > 0.0 && it <= 10.0 }
+
+private fun JSONObject.catalogReleaseDate(): java.time.LocalDate? =
+    runCatching { java.time.LocalDate.parse(optString("released").take(10)) }.getOrNull()

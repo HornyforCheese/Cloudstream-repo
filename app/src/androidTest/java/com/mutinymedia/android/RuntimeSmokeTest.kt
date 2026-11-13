@@ -102,10 +102,10 @@ class RuntimeSmokeTest {
         rule.onNodeWithText("Library").performClick()
         rule.onNodeWithText(item.title).assertExists()
         rule.onNodeWithText("Find streams").performScrollTo().performClick()
-        rule.onNodeWithText("Discover & play").assertExists()
+        rule.onNodeWithText("Title details").assertExists()
         rule.waitUntil(60_000) { vm.currentItem.value?.id == item.id && !vm.busy.value }
         rule.activityRule.scenario.recreate()
-        rule.onNodeWithText("Discover & play").assertExists()
+        rule.onNodeWithText("Title details").assertExists()
         assertTrue(runBlocking { SettingsStore(target).watchlist.first() }.any { it.id == item.id })
         nav("Ask AI")
         rule.onNode(hasSetTextAction()).performTextInput("Recommend a film")
@@ -275,4 +275,18 @@ class RuntimeSmokeTest {
         assertNull(vm.secrets.readSecret("stremio_session"))
     }
 
+
+    @Test fun test12_playbackFailureSelectsNextEligibleSource() {
+        val vm = model()
+        val broken = StreamOption("fixture-broken", "Broken fixture", "file:///mutiny-missing-fixture.mp4", "Fixture")
+        val next = StreamOption("fixture-next", "Alternative fixture",
+            "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Fixture")
+        rule.runOnIdle {
+            vm.currentItem.value = MediaItem("fallback-fixture", "movie", "Fallback fixture")
+            vm.streams.value = listOf(broken, next)
+            vm.activeStream.value = broken
+        }
+        rule.waitUntil(30_000) { vm.activeStream.value?.id == next.id }
+        rule.onNodeWithText("Alternative fixture").assertExists()
+    }
 }

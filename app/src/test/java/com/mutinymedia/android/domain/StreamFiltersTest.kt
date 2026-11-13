@@ -7,7 +7,7 @@ class StreamFiltersTest {
     private val sample = listOf(
         StreamOption("1", "1080p English Dub", "https://example.org/1.m3u8", "test"),
         StreamOption("2", "480p Japanese Audio English Sub", "https://example.org/2.mp4", "test"),
-        StreamOption("3", "480p Dual Audio", "https://example.org/3.mp4", "test"),
+        StreamOption("3", "480p English Japanese Dual Audio", "https://example.org/3.mp4", "test"),
         StreamOption("4", "Unlabelled release", "https://example.org/4.mp4", "test"),
     )
     @Test fun dubOnlyOnAnime() {
@@ -40,5 +40,36 @@ class StreamFiltersTest {
     }
     @Test fun bandwidthDoesNotReorderWhenDisabled() {
         assertEquals(sample, StreamFilters.rankForBandwidth(sample, UserSettings()))
+    }
+    @Test fun exactResolutionRejectsUnknownAndConflictingLabels() {
+        val mixed = sample + StreamOption("ambiguous", "480p / 1080p", null, "test") +
+            StreamOption("declared", "Adaptive", null, "test", declaredResolution = 1080)
+        assertEquals(listOf("1", "declared"), StreamFilters.select(mixed, false, UserSettings(exactResolution = 1080)).map { it.id })
+    }
+
+    @Test fun preferredAddonsAreOrderedAndExcludedAddonsAreHidden() {
+        val one = sample[0].copy(addonUrl = "first")
+        val two = sample[1].copy(addonUrl = "second")
+        val excluded = sample[2].copy(addonUrl = "disabled")
+        val preferences = UserSettings(addonUrls = listOf("second", "first"), excludedAddonUrls = setOf("disabled"))
+        assertEquals(listOf(two, one), StreamFilters.select(listOf(one, excluded, two), false, preferences))
+    }
+
+    @Test fun dualAudioDoesNotImplyEnglishDub() {
+        assertFalse(StreamFilters.isDub("Japanese and Spanish Dual Audio"))
+        assertFalse(StreamFilters.isDub("Dual Audio • English subtitles"))
+        assertFalse(StreamFilters.isDub("French Dubbed"))
+        assertTrue(StreamFilters.isDub("480p English Dub"))
+        val source = StreamOption("dual", "Dual Audio • Uncut", null, "test")
+        val preferences = UserSettings(animeDualAudioOnly = true, animeUncensoredOnly = true)
+        assertEquals(listOf(source), StreamFilters.select(sample + source, true, preferences))
+        assertEquals(sample, StreamFilters.select(sample, false, preferences))
+    }
+
+    @Test fun playbackProgressClearsNearStartAndEnd() {
+        assertNull(resumablePosition(5_000, 120_000))
+        assertNull(resumablePosition(117_000, 120_000))
+        assertNull(resumablePosition(30_000, -1))
+        assertEquals(30_000L, resumablePosition(30_000, 120_000))
     }
 }

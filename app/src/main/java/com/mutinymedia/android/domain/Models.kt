@@ -26,6 +26,10 @@ data class UserSettings(
     val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
     val themePreset: ThemePreset = ThemePreset.MUTINY,
     val themeFont: ThemeFont = ThemeFont.DEFAULT,
+    val exactResolution: Int? = null,
+    val excludedAddonUrls: Set<String> = emptySet(),
+    val animeDualAudioOnly: Boolean = false,
+    val animeUncensoredOnly: Boolean = false,
 ) {
     val targetKbps: Int get() = videoKbps + audioKbps
 }
@@ -40,7 +44,12 @@ data class MediaItem(
     val genres: List<String> = emptyList(),
     val year: Int? = null,
     val cast: List<String> = emptyList(),
+    val rating: Double? = null,
+    val releaseDate: java.time.LocalDate? = null,
+    val catalogFormat: String? = null,
 )
+
+data class MediaCollection(val name: String, val titles: List<MediaItem> = emptyList())
 
 data class Addon(
     val id: String,
@@ -51,6 +60,8 @@ data class Addon(
     val supportsMeta: Boolean = false,
 )
 
+data class StreamSubtitle(val url: String, val language: String, val mimeType: String)
+
 data class StreamOption(
     val id: String,
     val title: String,
@@ -59,11 +70,19 @@ data class StreamOption(
     val fileName: String? = null,
     val headers: Map<String, String> = emptyMap(),
     val externalUrl: String? = null,
+    val infoHash: String? = null,
+    val fileIndex: Int? = null,
+    val mimeType: String? = null,
+    val subtitles: List<StreamSubtitle> = emptyList(),
+    val cloudStreamSession: Boolean = false,
+    val declaredResolution: Int? = null,
+    val addonUrl: String? = null,
 ) {
     val playable: Boolean get() = runCatching {
         val uri = java.net.URI(url ?: return false)
         uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null
     }.getOrDefault(false)
+    val hasTorrent: Boolean get() = infoHash?.matches(Regex("[a-fA-F0-9]{40}")) == true
     val metadata: String get() = listOfNotNull(title, fileName).joinToString(" ")
 }
 
@@ -71,12 +90,46 @@ data class Episode(val id: String, val title: String, val season: Int, val numbe
 
 data class ChatLine(val fromUser: Boolean, val text: String)
 
+internal fun resumablePosition(positionMs: Long, durationMs: Long): Long? {
+    if (durationMs <= 0 || positionMs < 10_000 || positionMs >= durationMs) return null
+    val endMargin = (durationMs / 20).coerceIn(5_000, 60_000)
+    return positionMs.takeIf { durationMs - it > endMargin }
+}
+
 object StreamFilters {
-    /** Treat unlabelled releases as unknown; never call them a confirmed dub or sub. */
-    fun isDub(text: String): Boolean {
-        val t = text.lowercase()
-        return Regex("\\b(eng(lish)?[ ._-]?dub|dubbed|dual[ ._-]?audio|en[ ._-]?dub)\\b").containsMatchIn(t)
+    val resolutions = listOf(144, 240, 360, 480, 540, 576, 720, 900, 1080, 1440, 2160, 4320)
+    private val resolutionLabel = Regex("(?i)(?<![a-z0-9])(${resolutions.joinToString("|")})p(?![a-z0-9])")
+    private val uhdLabel = Regex("(?i)(?<![a-z0-9])(?:4k|uhd)(?![a-z0-9])")
+    private val dualAudioLabel = Regex("(?i)\\bdual[ ._-]?audio\\b")
+    private val uncensoredLabel = Regex("(?i)\\b(?:uncensored|uncut)\\b")
+    private val englishDubLabel = Regex("(?i)\\b(?:(?:english|eng|en)[ ._-]+(?:dub(?:bed)?|audio)|dubbed[ ._-]+(?:english|eng|en))\\b")
+    private val englishLanguage = Regex("(?i)\\b(?:english|eng)\\b")
+    private val bitrateLabel = Regex("\\b(\\d{3,5})[ ._-]?kbps\\b")
+
+    fun resolutionOf(source: StreamOption): Int? {
+        source.declaredResolution?.takeIf { it in resolutions }?.let { return it }
+        val label = source.metadata
+        val heights = resolutionLabel.findAll(label).map { it.groupValues[1].toInt() }.toMutableSet()
+        if (uhdLabel.containsMatchIn(label)) heights += 2160
+        return heights.singleOrNull()
     }
+
+    fun select(options: List<StreamOption>, isAnime: Boolean, settings: UserSettings): List<StreamOption> {
+        val eligible = filterAnime(options, isAnime, settings.animeMode).filter { source ->
+            (source.addonUrl == null || source.addonUrl !in settings.excludedAddonUrls) &&
+                (settings.exactResolution == null || resolutionOf(source) == settings.exactResolution) &&
+                (!isAnime || !settings.animeDualAudioOnly || dualAudioLabel.containsMatchIn(source.metadata)) &&
+                (!isAnime || !settings.animeUncensoredOnly || uncensoredLabel.containsMatchIn(source.metadata))
+        }
+        val priorities = settings.addonUrls.withIndex().associate { it.value to it.index }
+        return rankForBandwidth(eligible.sortedBy { priorities[it.addonUrl] ?: Int.MAX_VALUE }, settings)
+    }
+
+    /** Treat unlabelled releases as unknown; never call them a confirmed dub or sub. */
+    fun isDub(text: String): Boolean =
+        englishDubLabel.containsMatchIn(text) ||
+            (dualAudioLabel.containsMatchIn(text) && englishLanguage.containsMatchIn(text) &&
+                !Regex("(?i)\\b(?:english|eng)[ ._-]+(?:sub(?:bed)?|subtitles?)\\b").containsMatchIn(text))
     fun isSub(text: String): Boolean {
         val t = text.lowercase()
         return Regex("\\b(subbed|english[ ._-]?sub|eng[ ._-]?sub|subtitles?|japanese[ ._-]?audio|jp[ ._-]?audio|dual[ ._-]?audio)\\b").containsMatchIn(t)
@@ -89,8 +142,8 @@ object StreamFilters {
         if (!s.lowBandwidth) return options
         return options.sortedByDescending { option ->
             val text = option.metadata.lowercase()
-            val resolution = Regex("\\b(240|360|480|720|1080|2160)p\\b").find(text)?.groupValues?.get(1)?.toIntOrNull()
-            val kbps = Regex("\\b(\\d{3,5})[ ._-]?kbps\\b").find(text)?.groupValues?.get(1)?.toIntOrNull()
+            val resolution = resolutionOf(option)
+            val kbps = bitrateLabel.find(text)?.groupValues?.get(1)?.toIntOrNull()
             var score = if (resolution == null) 0 else if (resolution <= s.resolution) 25 else -40
             if (kbps != null) score += if (kbps <= s.videoKbps) 30 else -40
             if (s.codec == CodecPreference.EFFICIENT && Regex("\\b(av1|hevc|x265|h265)\\b").containsMatchIn(text)) score += 8

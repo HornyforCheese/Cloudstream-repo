@@ -70,8 +70,88 @@ class StremioClientTest {
         val initial = MediaItem("tt123", "movie", "Existing", "https://example.org/old.jpg", "Existing description")
         assertEquals(initial, client.metadata(addon, initial))
     }
+
+    @Test fun reportsCatalogEndpointFailureWhenNothingCanBeLoaded() = runBlocking {
+        val client = StremioClient { url, _ ->
+            if (url.endsWith("manifest.json")) JSONObject(manifest)
+            else throw java.net.SocketTimeoutException("simulated timeout")
+        }
+        val addon = client.inspectAddon("https://example.org")
+        val result = runCatching { client.catalog(addon, "test") }
+        assertTrue("Catalog failure must be reported", result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("catalog endpoints failed"))
+    }
+
+    @Test fun catalogDoesNotTruncateAfterFortyTitles() = runBlocking {
+        val metas = (1..60).joinToString(",") { i ->
+            """{"id":"tt$i","name":"Movie $i","poster":"javascript:bad"}"""
+        }
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json"))
+                """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[{"type":"movie","id":"top"}]}"""
+            else """{"metas":[$metas]}""")
+        }
+        val titles = client.catalog(client.inspectAddon("https://example.org"))
+        assertEquals(60, titles.size)
+        assertTrue(titles.all { it.poster == null })
+    }
+
+    @Test fun normalizesCinemetaAndStremioScheme() {
+        val client = StremioClient()
+        assertEquals("https://v3-cinemeta.strem.io", client.normalizeBase("https://v3-cinemeta.strem.io/manifest.json"))
+        assertEquals("https://v3-cinemeta.strem.io/manifest.json", client.manifestUrl("stremio://v3-cinemeta.strem.io/manifest.json"))
+        assertEquals("https://v3-cinemeta.strem.io/manifest.json", client.manifestUrl("https://v3-cinemeta.strem.io/"))
+    }
+
+    @Test fun retainsConfiguredPathAndEncodedSegments() {
+        val client = StremioClient()
+        val configured = "https://addons.example.org/%7Bconfig%7D/key%2Fvalue"
+        assertEquals(configured, client.normalizeBase("$configured/manifest.json"))
+        assertEquals("$configured/manifest.json", client.manifestUrl("$configured/manifest.json"))
+        assertEquals("$configured/manifest.json", client.manifestUrl("$configured/"))
+    }
+
+    @Test fun rejectsQueryFragmentsCredentialsAndInsecureSchemes() {
+        val client = StremioClient()
+        val invalid = listOf(
+            "http://example.org/manifest.json",
+            "https://example.org/manifest.json?token=secret",
+            "https://example.org/manifest.json#fragment",
+            "https://user:password@example.org/manifest.json",
+            "https:///manifest.json"
+        )
+        invalid.forEach { input ->
+            assertTrue("Expected rejection of invalid manifest URL", runCatching { client.normalizeBase(input) }.isFailure)
+        }
+    }
+
+    @Test fun inspectUsesExactConfiguredManifestEndpoint() = runBlocking {
+        val urls = mutableListOf<String>()
+        val client = StremioClient { url, _ ->
+            urls += url
+            JSONObject(manifest)
+        }
+        client.inspectAddon("https://addons.example.org/config%2Fabc/manifest.json")
+        assertEquals(listOf("https://addons.example.org/config%2Fabc/manifest.json"), urls)
+    }
+
     @Test fun rejectsNonManifestJson() = runBlocking {
         val client = StremioClient { _, _ -> JSONObject("{}") }
         assertTrue(runCatching { client.inspectAddon("https://example.org") }.isFailure)
+    }
+    @Test fun capturesCatalogRatingReleaseDateAndAnimeFormat() = runBlocking {
+        val client = StremioClient { url, _ ->
+            JSONObject(if (url.endsWith("manifest.json"))
+                """{"id":"fixture","name":"Fixture","resources":["catalog"],"catalogs":[{"type":"anime","id":"films"}]}"""
+            else """{"metas":[{"id":"kitsu:fixture","name":"Film","type":"movie","poster":"https://example.org/poster.jpg","released":"2026-08-20T00:00:00Z","imdbRating":"8.7","genres":["Fantasy"]}]}""")
+        }
+        val item = client.catalog(client.inspectAddon("https://example.org")).single()
+        assertEquals("anime", item.type)
+        assertEquals("movie", item.catalogFormat)
+        assertEquals(2026, item.year)
+        assertEquals(java.time.LocalDate.of(2026, 8, 20), item.releaseDate)
+        assertEquals(8.7, requireNotNull(item.rating), 0.0001)
+        assertEquals("https://example.org/poster.jpg", item.poster)
+        assertTrue(item.isAnime)
     }
 }

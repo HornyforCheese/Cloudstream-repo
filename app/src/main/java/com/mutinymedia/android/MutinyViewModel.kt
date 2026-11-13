@@ -6,6 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.mutinymedia.android.data.AccountRepository
 import com.mutinymedia.android.data.AccountImport
 import com.mutinymedia.android.data.AndroidServices
+import android.content.Context
+import android.os.SystemClock
+import com.mutinymedia.android.data.CloudStreamHost
+import com.mutinymedia.android.data.CloudStreamInstaller
+import com.mutinymedia.android.data.CloudStreamPlugin
+import com.mutinymedia.android.data.CloudStreamProviderClient
 import com.mutinymedia.android.data.CloudStreamRegistry
 import com.mutinymedia.android.data.OpenRouterClient
 import com.mutinymedia.android.data.SecretsStore
@@ -36,11 +42,11 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val android = AndroidServices(application)
     val stremio = StremioClient()
     private val cloudstream = CloudStreamRegistry()
-    private val cloudInstaller = com.mutinymedia.android.data.CloudStreamInstaller(application)
-    private val cloudHost = com.mutinymedia.android.data.CloudStreamHost(application)
-    val cloudHostStatuses = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamHost.ProviderStatus>>(emptyList())
-    val installedCloudPlugins = MutableStateFlow(cloudInstaller.registeredPackages().keys)
-    val cloudStreamPlugins = MutableStateFlow<List<com.mutinymedia.android.data.CloudStreamPlugin>>(emptyList())
+    private val cloudHost = (application as MutinyApplication).cloudStreamHost
+    private val cloudClient = CloudStreamProviderClient(cloudHost)
+    val cloudHostStatuses = MutableStateFlow<List<CloudStreamHost.ProviderStatus>>(emptyList())
+    val cloudStreamPlugins = MutableStateFlow<List<CloudStreamPlugin>>(emptyList())
+    private var cloudDetails: CloudStreamProviderClient.Details? = null
     private val openrouter = OpenRouterClient()
     val freeOpenRouterModels = MutableStateFlow<List<OpenRouterModel>>(emptyList())
     private val realDebrid = com.mutinymedia.android.data.RealDebridClient()
@@ -48,12 +54,27 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     val settings: StateFlow<UserSettings> = store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, UserSettings())
     val addons = MutableStateFlow<List<Addon>>(emptyList())
     val watchlist: StateFlow<List<MediaItem>> = store.watchlist.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val collections = store.collections.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val catalog = MutableStateFlow<List<MediaItem>>(emptyList())
+    val homeCatalogLoading = MutableStateFlow(false)
+    private val catalogMutex = Mutex()
+    private var lastCatalogInputs: CatalogInputs? = null
+    private var lastCatalogLoadMs = 0L
+
+    private data class CatalogInputs(
+        val addons: List<String>,
+        val extensions: List<Pair<String, Int>>,
+    )
     val episodes = MutableStateFlow<List<Episode>>(emptyList())
     val selectedEpisode = MutableStateFlow<String?>(null)
     val streams = MutableStateFlow<List<StreamOption>>(emptyList())
     val currentItem = MutableStateFlow<MediaItem?>(null)
     val activeStream = MutableStateFlow<StreamOption?>(null)
+    val playbackPositions = store.playbackPositions.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    var playbackStartMs = 0L
+        private set
+    var activePlaybackKey: String? = null
+        private set
     val chat = MutableStateFlow<List<ChatLine>>(emptyList())
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
@@ -61,36 +82,121 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
 
     private val operationMutex = Mutex()
     private val providerSlots = Semaphore(4)
+    private val providerWarnings = MutableStateFlow<String?>(null)
+    private fun enabledAddons(): List<Addon> {
+        val preferences = settings.value
+        val priorities = preferences.addonUrls.withIndex().associate { it.value to it.index }
+        return addons.value.filterNot { it.baseUrl in preferences.excludedAddonUrls }
+            .sortedBy { priorities[it.baseUrl] ?: Int.MAX_VALUE }
+    }
+
     private suspend fun <T> queryProviders(block: suspend (Addon) -> List<T>): List<T> = coroutineScope {
-        val providers = addons.value
-        val results = providers.map { addon -> async {
-            providerSlots.withPermit { providerResult { block(addon) } }
+        val providers = enabledAddons()
+        val checks = providers.map { addon -> async {
+            providerSlots.withPermit {
+                try { block(addon) to null }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { null to addonFailure(addon.baseUrl, e) }
+            }
         } }.awaitAll()
-        if (results.isNotEmpty() && results.all { it == null }) error("All connected providers failed. Check your connection and addon configuration.")
-        if (results.any { it == null }) message.value = "Some providers failed; showing available results"
-        results.filterNotNull().flatten()
+        val failures = checks.mapNotNull { it.second }
+        if (providers.isNotEmpty() && failures.size == providers.size) {
+            error("All ${providers.size} providers failed: " + failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else ""))
+        }
+        providerWarnings.value = if (failures.isNotEmpty()) {
+            "${providers.size - failures.size}/${providers.size} providers succeeded. " +
+                failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else "")
+        } else null
+        if (providerWarnings.value != null) message.value = providerWarnings.value
+        checks.mapNotNull { it.first }.flatten()
     }
 
     private suspend fun <T> providerResult(block: suspend () -> T): T? =
-        try { block() } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+        try { block() } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            val reason = when (e) {
+                is java.net.SocketTimeoutException -> "timeout"
+                is java.net.UnknownHostException -> "DNS lookup failed"
+                else -> e.javaClass.simpleName
+            }
+            message.value = "Metadata or episode lookup failed ($reason). Other providers will be tried."
+            null
+        }
+
+    /** Diagnostic contains only a hostname, never configured paths or credentials. */
+    private fun addonFailure(url: String, error: Exception): String {
+        val host = runCatching { java.net.URI(url.replace(Regex("^stremio://", RegexOption.IGNORE_CASE), "https://")).host }
+            .getOrNull()?.take(80) ?: "invalid URL"
+        val reason = when (error) {
+            is java.net.SocketTimeoutException -> "timeout"
+            is java.net.UnknownHostException -> "DNS lookup failed"
+            is javax.net.ssl.SSLException -> "TLS error"
+            is java.net.ConnectException -> "connection refused"
+            is IllegalArgumentException -> "invalid URL or manifest"
+            else -> "request failed (" + error.javaClass.simpleName + ")"
+        }
+        return "$host: $reason"
+    }
 
     init {
         viewModelScope.launch {
-            store.settings.map { it.addonUrls }.distinctUntilChanged().collectLatest { urls ->
-                val result = coroutineScope {
-                    urls.map { url -> async { providerSlots.withPermit { providerResult { stremio.inspectAddon(url) } } } }
-                        .awaitAll().filterNotNull()
+            operationMutex.withLock {
+                try {
+                    cloudHostStatuses.value = cloudHost.restore()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    message.value = "Could not restore CloudStream extensions (${error.javaClass.simpleName})"
                 }
+            }
+        }
+        viewModelScope.launch {
+            store.settings.map { it.addonUrls }.distinctUntilChanged().collectLatest { urls ->
+                val checks = coroutineScope {
+                    urls.map { url -> async {
+                        providerSlots.withPermit {
+                            try { stremio.inspectAddon(url) to null }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { null to addonFailure(url, e) }
+                        }
+                    } }.awaitAll()
+                }
+                val verified = checks.mapNotNull { it.first }
+                val failures = checks.mapNotNull { it.second }
+                // Keep previously verified providers during temporary outages, but respect removals.
+                val previous = addons.value.associateBy { it.baseUrl }
+                val result = urls.mapNotNull { url ->
+                    val base = runCatching { stremio.normalizeBase(url) }.getOrNull()
+                    verified.firstOrNull { it.baseUrl == base } ?: previous[base]
+                }.distinctBy { it.baseUrl }
                 if (addons.value.map { it.baseUrl } != result.map { it.baseUrl }) {
                     catalog.value = emptyList()
                     catalogSearch.value = null
                 }
                 addons.value = result
-                if (urls.size > result.size) message.value = "Some saved Stremio addons are unreachable"
+                if (failures.isNotEmpty()) message.value = "Stremio: ${verified.size}/${urls.size} addons verified; previously verified providers retained during outages. " + failures.take(3).joinToString("; ") + if (failures.size > 3) "; +${failures.size - 3} more failed" else ""
             }
         }
-        viewModelScope.launch { accounts.restoreStremio() }
-        viewModelScope.launch { accounts.restoreNuvio() }
+        // Restore sessions first, then import add-ons only when verification succeeds.
+        // Import is additive; a failed remote request never clears locally saved add-ons.
+        viewModelScope.launch {
+            accounts.restoreStremio()
+            if (accounts.stremioStatus.value.connected) {
+                try { importAccount(accounts.pullStremio(), "Stremio") }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message.value = "Stremio signed in; addon sync failed. Retry import in Settings." }
+            }
+        }
+        viewModelScope.launch {
+            accounts.restoreNuvio()
+            if (accounts.nuvioStatus.value.connected) {
+                try { importAccount(accounts.pullNuvio(), "Nuvio") }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message.value = "Nuvio signed in; select or unlock your profile, then retry import." }
+            }
+        }
     }
     private suspend fun importAccount(data: AccountImport, label: String) {
         store.importAccountData(data.addons, data.items)
@@ -106,14 +212,23 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     fun logoutStremio() = runJob { val revoked=accounts.logoutStremio();message.value=if(revoked) "Signed out of Stremio; local titles and addons retained" else "Stremio sign-in cleared locally; remote revocation could not be confirmed" }
     fun loginNuvio(server: String,email: String,password: String) = runJob {
         accounts.loginNuvio(server,email,password)
-        message.value="Signed in to Nuvio. Select a profile and import its addons/watchlist."
+        message.value="Signed in to Nuvio. Select a profile to synchronize its addons."
     }
-    fun selectNuvioProfile(index: Int,pin: String) = runJob { accounts.selectNuvioProfile(index,pin);message.value="Nuvio profile selected" }
+    fun selectNuvioProfile(index: Int,pin: String) = runJob {
+        accounts.selectNuvioProfile(index,pin)
+        importAccount(accounts.pullNuvio(),"Nuvio")
+    }
     fun syncNuvio() = runJob { importAccount(accounts.pullNuvio(),"Nuvio") }
     fun verifyNuvio() = runJob { accounts.restoreNuvio() }
     fun logoutNuvio() = runJob { val revoked=accounts.logoutNuvio();message.value=if(revoked) "Signed out of Nuvio; local titles and addons retained" else "Nuvio sign-in cleared locally; remote revocation could not be confirmed" }
     fun saveToWatchlist(item: MediaItem) = runJob { store.addToWatchlist(item); message.value = "Saved to local watchlist" }
     fun removeFromWatchlist(item: MediaItem) = runJob { store.removeFromWatchlist(item); message.value = "Removed from watchlist" }
+    fun createCollection(name: String) = runJob { store.createCollection(name) }
+    fun deleteCollection(name: String) = runJob { store.deleteCollection(name) }
+    fun setCollectionTitle(name: String, item: MediaItem, saved: Boolean) = runJob {
+        store.setCollectionTitle(name, item, saved)
+        message.value = if (saved) "Saved to $name" else "Removed from $name"
+    }
     fun report(text: String?) { message.value = text }
     fun runJob(block: suspend () -> Unit) {
         viewModelScope.launch {
@@ -131,50 +246,74 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         message.value = "Added ${addon.title}"
     }
     fun refreshAddons() = runJob {
-        val result = settings.value.addonUrls.mapNotNull { url -> providerResult { stremio.inspectAddon(url) } }
-        addons.value = result
-        message.value = "Verified ${result.size} of ${settings.value.addonUrls.size} saved addons"
+        val urls = settings.value.addonUrls
+        val checks = urls.map { url ->
+            try { stremio.inspectAddon(url) to null }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { null to addonFailure(url, e) }
+        }
+        val result = checks.mapNotNull { it.first }
+        val failures = checks.mapNotNull { it.second }
+        val previous = addons.value.associateBy { it.baseUrl }
+        addons.value = urls.mapNotNull { url ->
+            val base = runCatching { stremio.normalizeBase(url) }.getOrNull()
+            result.firstOrNull { it.baseUrl == base } ?: previous[base]
+        }.distinctBy { it.baseUrl }
+        message.value = "Verified ${result.size}/${urls.size} saved addons" +
+            if (failures.isNotEmpty()) ". " + failures.take(3).joinToString("; ") +
+                (if (failures.size > 3) "; +${failures.size - 3} more failed" else "") else ""
     }
     fun removeAddon(url: String) = runJob { store.removeAddon(url); message.value = "Addon removed" }
+    fun setAddonEnabled(url: String, enabled: Boolean) = runJob {
+        store.setAddonEnabled(url, enabled)
+        catalog.value = emptyList()
+        catalogSearch.value = null
+    }
     fun addExtensionRepo(url: String) = runJob {
         val label = cloudstream.inspectRepository(url)
         store.addRepository(url.trim())
-        message.value = "Saved CloudStream repository: $label (discovery only)"
+        message.value = "Saved CloudStream repository: $label"
     }
-    fun installCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
-        cloudInstaller.install(plugin)
-        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
-        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
-        message.value = "Downloaded ${plugin.name}. Execution requires CloudStream runtime compatibility."
-    }
-    /** Direct .cs3 URLs can be pasted without first subscribing to a repository. */
+    fun installCloudStreamPlugin(plugin: CloudStreamPlugin) = runJob { installCloudExtension(plugin) }
+
     fun installCloudStreamUrl(url: String) = runJob {
         val validated = com.mutinymedia.android.data.Network.validateHttps(url)
         require(java.net.URI(validated).path.endsWith(".cs3", ignoreCase = true)) {
             "Paste a direct HTTPS .cs3 extension URL, or add a CloudStream repository URL above"
         }
-        val name = java.net.URI(validated).path.substringAfterLast('/').removeSuffix(".cs3")
-        val plugin = com.mutinymedia.android.data.CloudStreamPlugin(name, "Direct URL extension", 0, validated, validated)
-        cloudInstaller.install(plugin)
-        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
-        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
-        message.value = "Extension downloaded. CloudStream host compatibility is required before it can search."
+        val name = java.net.URI(validated).path.substringAfterLast('/')
+        installCloudExtension(CloudStreamPlugin(name, "Direct URL extension", 0, validated, validated))
     }
-    fun uninstallCloudStreamPlugin(plugin: com.mutinymedia.android.data.CloudStreamPlugin) = runJob {
-        cloudInstaller.uninstall(plugin)
-        installedCloudPlugins.value = cloudInstaller.registeredPackages().keys
-        cloudHost.unloadAll()
-        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
-        message.value = "Removed ${plugin.name}"
+
+    private suspend fun installCloudExtension(plugin: CloudStreamPlugin) {
+        try {
+            val status = cloudHost.install(plugin)
+            message.value = "${status.name}: ${status.detail}"
+        } finally {
+            cloudHostStatuses.value = cloudHost.statuses()
+        }
     }
-    fun inspectCloudStreamHost() = runJob {
-        cloudHostStatuses.value = installedCloudPlugins.value.map { cloudHost.inspect(it) }
-        message.value = "Checked ${cloudHostStatuses.value.size} installed CloudStream packages for host compatibility"
+
+    fun uninstallCloudStreamPlugin(id: String) = runJob {
+        cloudHost.uninstall(id)
+        cloudHostStatuses.value = cloudHost.statuses()
+        message.value = "CloudStream extension removed"
     }
-    override fun onCleared() {
-        cloudHost.unloadAll()
-        super.onCleared()
+
+    fun setCloudStreamEnabled(id: String, enabled: Boolean) = runJob {
+        val status = cloudHost.setEnabled(id, enabled)
+        cloudHostStatuses.value = cloudHost.statuses()
+        message.value = "${status.name}: ${status.detail}"
     }
+
+    fun reloadCloudStreamPlugin(id: String) = runJob {
+        val status = cloudHost.reload(id)
+        cloudHostStatuses.value = cloudHost.statuses()
+        message.value = "${status.name}: ${status.detail}"
+    }
+
+    fun openCloudStreamSettings(id: String, context: Context) = runJob { cloudHost.openSettings(id, context) }
+
     fun removeExtensionRepo(url: String) = runJob { store.removeRepository(url); cloudStreamPlugins.value = cloudStreamPlugins.value.filterNot { it.repository == url } }
     fun discoverCloudStreamPlugins() = runJob {
         val repos = settings.value.extensionRepositories
@@ -189,17 +328,53 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         message.value = "Discovered ${cloudStreamPlugins.value.size} CloudStream plugins" +
             if (failures.isNotEmpty()) " (${failures.size} repositories failed)" else ""
     }
+    suspend fun refreshHomeCatalogs(force: Boolean = false) = catalogMutex.withLock {
+        val inputs = CatalogInputs(
+            enabledAddons().filter { it.supportsCatalog }.map { it.baseUrl },
+            cloudHostStatuses.value.filter { it.supportsCatalog }.map { it.packageId to it.version },
+        )
+        if (inputs.addons.isEmpty() && inputs.extensions.isEmpty()) {
+            lastCatalogInputs = null
+            catalog.value = emptyList()
+            return@withLock
+        }
+        val now = SystemClock.elapsedRealtime()
+        val unchanged = inputs == lastCatalogInputs
+        if (!force && unchanged && catalog.value.isNotEmpty() && now - lastCatalogLoadMs < 15 * 60_000) return@withLock
+        if (!unchanged) catalog.value = emptyList()
+        homeCatalogLoading.value = true
+        try {
+            val loaded = loadProviderCatalogs()
+            if (loaded.isNotEmpty() || !unchanged) catalog.value = loaded
+            lastCatalogInputs = inputs
+            lastCatalogLoadMs = SystemClock.elapsedRealtime()
+        } finally {
+            homeCatalogLoading.value = false
+        }
+    }
+
     fun browseCatalogs() = runJob {
-        catalog.value = loadProviderCatalogs()
+        refreshHomeCatalogs(force = true)
         if (catalog.value.isEmpty()) message.value = "No titles found in your configured catalogs."
     }
 
-    private suspend fun loadProviderCatalogs(): List<MediaItem> =
-        queryProviders { addon -> stremio.catalog(addon) }.distinctBy { it.type to it.id }
+    private suspend fun loadProviderCatalogs(): List<MediaItem> = coroutineScope {
+        val cloud = async { cloudClient.browse() }
+        val stremio = async { providerResult { queryProviders { addon -> this@MutinyViewModel.stremio.catalog(addon) } }.orEmpty() }
+        val results = cloud.await()
+        showCloudWarnings(results)
+        mergeCatalogTitles(stremio.await() + results.items)
+    }
+
+    private fun showCloudWarnings(results: CloudStreamProviderClient.Titles) {
+        if (results.unavailableProviders > 0) {
+            message.value = "${results.unavailableProviders} CloudStream provider(s) did not respond"
+        }
+    }
 
     private suspend fun savedCatalogItems(): List<MediaItem> {
-        if (catalog.value.isEmpty() && addons.value.any { it.supportsCatalog }) {
-            catalog.value = loadProviderCatalogs()
+        if (catalog.value.isEmpty() && (enabledAddons().any { it.supportsCatalog } || cloudHostStatuses.value.any { it.supportsCatalog })) {
+            refreshHomeCatalogs()
         }
         return (catalog.value + watchlist.value).distinctBy { it.type to it.id }
     }
@@ -212,11 +387,19 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         }
         catalogSearch.value = CatalogSearchResult(term, emptyList())
         val saved = (catalog.value + watchlist.value).filter { it.title.contains(term, ignoreCase = true) }
-        val fromAddons = queryProviders { addon -> stremio.catalog(addon, term) }
-        val publicMetadata = providerResult {
-            stremio.catalog(Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term)
-        }.orEmpty()
-        catalogSearch.value = CatalogSearchResult(term, (fromAddons + saved + publicMetadata).distinctBy { it.type to it.id })
+        val results = coroutineScope {
+            val cloudSearch = async { cloudClient.search(term) }
+            val addonsSearch = async { providerResult { queryProviders { addon -> stremio.catalog(addon, term) } }.orEmpty() }
+            val fallbackSearch = async {
+                providerResult {
+                    stremio.catalog(Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true), term)
+                }.orEmpty()
+            }
+            val fromCloud = cloudSearch.await()
+            showCloudWarnings(fromCloud)
+            addonsSearch.await() + fromCloud.items + saved + fallbackSearch.await()
+        }
+        catalogSearch.value = CatalogSearchResult(term, results.distinctBy { it.type to it.id })
     }
 
     fun searchCatalogWithAi(query: String, filters: CatalogFilters) = runJob {
@@ -247,24 +430,57 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         episodes.value = emptyList()
         selectedEpisode.value = null
         currentItem.value = media
-        val metadataSources = addons.value.filter { it.supportsMeta } +
-            Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
-        // Prefer a configured metadata provider, then use Cinemeta as a public fallback.
-        for (source in metadataSources) {
-            val enriched = providerResult { stremio.metadata(source, currentItem.value!!) } ?: continue
-            currentItem.value = enriched
-            if (enriched.poster != null && enriched.description != null && enriched.title != media.id) break
+        cloudDetails = null
+        if (CloudStreamProviderClient.owns(media)) {
+            val details = cloudClient.details(media)
+            cloudDetails = details
+            currentItem.value = details.item
+            episodes.value = details.episodes
+            when {
+                details.episodes.isNotEmpty() -> message.value = "Select an episode to find streams"
+                details.movieData != null -> showStreams(cloudClient.streams(details.item, details.movieData))
+                else -> message.value = "CloudStream returned no supported episodes or playback data"
+            }
+            return
         }
-        if (addons.value.isEmpty()) error("Install a Stremio addon first")
+        val metadataSources = enabledAddons().filter { it.supportsMeta } +
+            Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
+        // Fetch metadata concurrently, but merge in configured-provider order.
+        // One slow provider must not delay every provider after it.
+        val metadataResults = coroutineScope {
+            metadataSources.distinctBy { it.baseUrl }.map { source ->
+                async { providerSlots.withPermit { providerResult { stremio.metadata(source, media) } } }
+            }.awaitAll()
+        }
+        var enrichedItem = media
+        for (candidate in metadataResults.filterNotNull()) {
+            enrichedItem = enrichedItem.copy(
+                title = if (enrichedItem.title == media.id && candidate.title != media.id) candidate.title else enrichedItem.title,
+                poster = enrichedItem.poster ?: candidate.poster,
+                description = enrichedItem.description ?: candidate.description,
+                isAnime = enrichedItem.isAnime || candidate.isAnime,
+                genres = enrichedItem.genres.ifEmpty { candidate.genres },
+                year = enrichedItem.year ?: candidate.year,
+                cast = enrichedItem.cast.ifEmpty { candidate.cast },
+                rating = enrichedItem.rating ?: candidate.rating,
+                releaseDate = enrichedItem.releaseDate ?: candidate.releaseDate,
+            )
+        }
+        currentItem.value = enrichedItem
         if (media.type in listOf("series", "anime") && !Regex(":\\d+:\\d+$").containsMatchIn(media.id)) {
-            val metadataSources = addons.value.filter { it.supportsMeta } +
+            val metadataSources = enabledAddons().filter { it.supportsMeta } +
                 com.mutinymedia.android.domain.Addon("com.linvo.cinemeta", "Cinemeta", "https://v3-cinemeta.strem.io", true, false, true)
-            episodes.value = metadataSources.flatMap { addon -> providerResult { stremio.episodes(addon, media) }.orEmpty() }
-                .distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
+            episodes.value = coroutineScope {
+                metadataSources.distinctBy { it.baseUrl }.map { addon ->
+                    async { providerSlots.withPermit { providerResult { stremio.episodes(addon, media) }.orEmpty() } }
+                }.awaitAll()
+            }.flatten().distinctBy { it.id }.sortedWith(compareBy({ it.season }, { it.number }))
             if (episodes.value.isNotEmpty()) {
                 message.value = "Select an episode to find streams"
                 return
             }
+            message.value = "No episodes were returned for this series. Check the metadata provider or try another title."
+            return
         }
         fetchStreams(media)
     }
@@ -272,15 +488,34 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
         val media = currentItem.value ?: return@runJob
         selectedEpisode.value = episode.id
         streams.value = emptyList()
-        fetchStreams(media.copy(id = episode.id))
+        val details = cloudDetails
+        if (CloudStreamProviderClient.owns(media)) {
+            val (data, dub) = details?.episodeData?.get(episode.id) ?: error("CloudStream episode is no longer available")
+            showStreams(cloudClient.streams(media, data, dub))
+        } else {
+            fetchStreams(media.copy(id = episode.id))
+        }
     }
     private suspend fun fetchStreams(media: MediaItem) {
+        if (enabledAddons().none { it.supportsStreams }) {
+            message.value = "Enable a stream-capable addon under Settings → Integrations."
+            return
+        }
         val found = queryProviders { addon -> stremio.streams(addon, media.type, media.id) }
             .distinctBy { Triple(it.url ?: it.id, it.headers, it.externalUrl) }
-        val filtered = StreamFilters.filterAnime(found, currentItem.value?.isAnime == true, settings.value.animeMode)
-        streams.value = StreamFilters.rankForBandwidth(filtered, settings.value)
-        if (found.isNotEmpty() && filtered.isEmpty()) message.value = "No streams match the selected anime language filter"
-        if (streams.value.isEmpty()) message.value = "No streams returned by connected providers"
+        showStreams(found, providerWarnings.value)
+    }
+
+    private fun showStreams(found: List<StreamOption>, warning: String? = null) {
+        // Keep raw provider results so the UI can change language and bandwidth filters without another request.
+        streams.value = found
+        val matched = StreamFilters.select(found, currentItem.value?.isAnime == true, settings.value)
+        message.value = when {
+            found.isEmpty() -> listOfNotNull("No streams returned by connected providers", warning).joinToString(". ")
+            matched.isEmpty() -> "No sources match your active filters."
+            matched.none { it.playable } && matched.any { it.hasTorrent } -> "Use Real-Debrid to resolve a supported torrent source."
+            else -> warning
+        }
     }
     fun saveRealDebridKey(token: String) = runJob {
         if (token.isBlank()) {
@@ -301,17 +536,55 @@ class MutinyViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun playViaRealDebrid(stream: StreamOption) = runJob {
         val token = secrets.readSecret("debrid_real_debrid") ?: error("Add a Real-Debrid key under Settings → Integrations → Debrid Services")
-        val link = stream.url ?: error("This stream does not provide a supported hoster link")
-        val direct = realDebrid.resolve(token, link)
-        activeStream.value = stream.copy(url = direct, provider = "Real-Debrid")
+        val direct = when {
+            stream.hasTorrent -> realDebrid.resolveTorrent(token, requireNotNull(stream.infoHash), stream.fileIndex)
+            stream.playable -> realDebrid.resolve(token, requireNotNull(stream.url))
+            else -> error("This source has no supported HTTPS link or torrent hash")
+        }
+        val sameSource = direct == stream.url
+        play(stream.copy(url = direct, provider = "Real-Debrid", infoHash = null, fileIndex = null,
+            headers = if (sameSource) stream.headers else emptyMap(),
+            cloudStreamSession = sameSource && stream.cloudStreamSession,
+            mimeType = stream.mimeType.takeIf { sameSource }))
     }
+    fun playbackKey(item: MediaItem, episode: String?): String =
+        CloudStreamInstaller.digest("${item.type}\u0000${item.id}\u0000${episode.orEmpty()}")
+
+    fun recordPlayback(key: String?, positionMs: Long, durationMs: Long) {
+        if (key == null) return
+        viewModelScope.launch {
+            try {
+                store.savePlaybackPosition(key, resumablePosition(positionMs, durationMs))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                message.value = "Could not save playback progress"
+            }
+        }
+    }
+
     fun play(stream: StreamOption) {
-        if (!stream.playable) { message.value = "This source requires a torrent/debrid engine that is not integrated yet"; return }
+        if (!stream.playable) {
+            message.value = "Choose a playable HTTPS source or resolve a supported torrent with Real-Debrid."
+            return
+        }
+        activePlaybackKey = currentItem.value?.let { playbackKey(it, selectedEpisode.value) }
+        playbackStartMs = activePlaybackKey?.let { playbackPositions.value[it] } ?: 0L
         activeStream.value = stream
     }
+
+    fun continuePlayback(stream: StreamOption, positionMs: Long) {
+        playbackStartMs = positionMs.coerceAtLeast(0)
+        activeStream.value = stream
+    }
+
     fun playTestVideo() {
         currentItem.value = MediaItem("demo", "movie", "Big Buck Bunny • Creative Commons test video")
-        activeStream.value = StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample")
+        activePlaybackKey = null
+        continuePlayback(
+            StreamOption("sample", "Big Buck Bunny", "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4", "Public sample"),
+            0L,
+        )
     }
     fun download(url: String, filename: String) = runJob {
         val id = android.downloadFile(url, filename)

@@ -9,6 +9,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import android.net.Uri
+import com.mutinymedia.android.data.CloudStreamNetwork
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -27,21 +32,45 @@ import com.mutinymedia.android.domain.UserSettings
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Unit) {
+fun MutinyPlayer(
+    stream: StreamOption,
+    settings: UserSettings,
+    onExit: () -> Unit,
+    initialPositionMs: Long = 0L,
+    onPosition: (Long, Long) -> Unit = { _, _ -> },
+    onPlaybackFailure: (StreamOption, Long) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var savedPosition by rememberSaveable(stream.url) { mutableLongStateOf(0L) }
-    var shouldPlay by rememberSaveable(stream.url) { mutableStateOf(true) }
-    val selector = remember(stream.url) { DefaultTrackSelector(context) }
+    var savedPosition by rememberSaveable(stream) { mutableLongStateOf(initialPositionMs) }
+    var shouldPlay by rememberSaveable(stream) { mutableStateOf(true) }
+    val selector = remember(stream.id) { DefaultTrackSelector(context) }
     val bandwidthMeter = remember(stream.url, stream.headers) {
         DefaultBandwidthMeter.Builder(context).build()
     }
-    val player = remember(stream.url, stream.headers) {
-        val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
+    val player = remember(stream) {
+        val http = if (stream.cloudStreamSession) {
+            val source = requireNotNull(stream.url?.toHttpUrlOrNull())
+            ResolvingDataSource.Factory(OkHttpDataSource.Factory(CloudStreamNetwork.client)) { request ->
+                val target = request.uri.toString().toHttpUrlOrNull()
+                val sameOrigin = target?.host == source.host && target.port == source.port && target.scheme == source.scheme
+                val headers = if (sameOrigin) stream.headers else stream.headers.filterKeys { name ->
+                    name.equals("referer", true) || name.equals("user-agent", true)
+                }
+                request.withAdditionalHeaders(headers)
+            }
+        } else {
+            DefaultHttpDataSource.Factory().setDefaultRequestProperties(stream.headers)
+        }
         ExoPlayer.Builder(context).setTrackSelector(selector)
             .setBandwidthMeter(bandwidthMeter)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))).build().apply {
-            setMediaItem(MediaItem.fromUri(requireNotNull(stream.url)))
+            val subtitles = stream.subtitles.map {
+                MediaItem.SubtitleConfiguration.Builder(Uri.parse(it.url))
+                    .setMimeType(it.mimeType).setLanguage(it.language).setLabel(it.language).build()
+            }
+            setMediaItem(MediaItem.Builder().setUri(requireNotNull(stream.url))
+                .setMimeType(stream.mimeType).setSubtitleConfigurations(subtitles).build())
             seekTo(savedPosition)
             prepare()
             playWhenReady = shouldPlay
@@ -49,10 +78,26 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
             setHandleAudioBecomingNoisy(true)
         }
     }
+    val latestPositionHandler by rememberUpdatedState(onPosition)
+    fun reportPosition() {
+        val duration = player.duration
+        if (duration > 0 && !player.isCurrentMediaItemLive &&
+            (player.playbackState == androidx.media3.common.Player.STATE_READY ||
+                player.playbackState == androidx.media3.common.Player.STATE_ENDED)) {
+            latestPositionHandler(player.currentPosition, duration)
+        }
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            delay(15_000)
+            if (player.isPlaying) reportPosition()
+        }
+    }
     DisposableEffect(player, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
+                    reportPosition()
                     savedPosition = player.currentPosition
                     shouldPlay = player.playWhenReady
                     player.pause()
@@ -63,6 +108,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            reportPosition()
             savedPosition = player.currentPosition
             lifecycleOwner.lifecycle.removeObserver(observer)
             player.release()
@@ -85,7 +131,7 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
         selector.setParameters(builder)
     }
     var resizeMode by remember(stream.url) { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
-    var playbackError by remember(stream.url) { mutableStateOf<String?>(null) }
+    var playbackError by remember(stream.id) { mutableStateOf<String?>(null) }
     var showBitrate by rememberSaveable(stream.url) { mutableStateOf(false) }
     var bitrateText by remember(player) { mutableStateOf<String?>(null) }
     LaunchedEffect(player, showBitrate) {
@@ -96,10 +142,12 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
             delay(1500)
         }
     }
+    val latestFailureHandler by rememberUpdatedState(onPlaybackFailure)
     DisposableEffect(player) {
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                playbackError = "Playback failed: ${error.errorCodeName}. Try another source."
+                playbackError = "Playback failed: ${error.errorCodeName}. Trying another source if available."
+                latestFailureHandler(stream, player.currentPosition)
             }
         }
         player.addListener(listener)
@@ -122,11 +170,16 @@ fun MutinyPlayer(stream: StreamOption, settings: UserSettings, onExit: () -> Uni
                     PlayerView(context).apply {
                         this.player = player
                         useController = true
+                        setShowSubtitleButton(true)
                         this.resizeMode = resizeMode
                         keepScreenOn = true
                     }
                 },
-                update = { it.player = player; it.resizeMode = resizeMode },
+                update = {
+                    it.player = player
+                    it.resizeMode = resizeMode
+                    it.setShowSubtitleButton(true)
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }

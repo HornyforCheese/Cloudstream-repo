@@ -3,6 +3,9 @@ package com.mutinymedia.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import com.lagradost.cloudstream3.actions.VideoClickActionHolder
+import java.lang.ref.WeakReference
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -26,9 +29,20 @@ private enum class Section(val display: String, val glyph: String) {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pluginActivityResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VideoClickActionHolder.activity = WeakReference(this)
+        VideoClickActionHolder.resultLauncher = { intent, options -> pluginActivityResult.launch(intent, options) }
         setContent { MutinyRoot() }
+    }
+
+    override fun onDestroy() {
+        if (VideoClickActionHolder.activity?.get() === this) {
+            VideoClickActionHolder.activity = null
+            VideoClickActionHolder.resultLauncher = null
+        }
+        super.onDestroy()
     }
 }
 
@@ -43,20 +57,48 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
     val addons by vm.addons.collectAsStateWithLifecycle()
     val watchlist by vm.watchlist.collectAsStateWithLifecycle()
     val catalog by vm.catalog.collectAsStateWithLifecycle()
+    val catalogLoading by vm.homeCatalogLoading.collectAsStateWithLifecycle()
+    val cloudStatuses by vm.cloudHostStatuses.collectAsStateWithLifecycle()
     val msg by vm.message.collectAsStateWithLifecycle()
     val activeStream by vm.activeStream.collectAsStateWithLifecycle()
+    val availableStreams by vm.streams.collectAsStateWithLifecycle()
+    val currentItem by vm.currentItem.collectAsStateWithLifecycle()
+    val selectedEpisode by vm.selectedEpisode.collectAsStateWithLifecycle()
+    val isAnime = currentItem?.isAnime == true
+    val playableStreams = remember(availableStreams, isAnime, settings) {
+        com.mutinymedia.android.domain.StreamFilters.select(availableStreams, isAnime, settings).filter { it.playable }
+    }
+    var attemptedSources by remember(currentItem?.id, selectedEpisode) { mutableStateOf<Set<String>>(emptySet()) }
+    fun nextSource(failed: com.mutinymedia.android.domain.StreamOption, positionMs: Long) {
+        val attempted = attemptedSources + failed.id
+        val next = playableStreams.firstOrNull { it.id !in attempted && it.id != failed.id }
+        attemptedSources = attempted
+        if (next == null) vm.report("Playback failed. No other playable HTTPS sources remain.")
+        else {
+            attemptedSources = attempted + next.id
+            vm.continuePlayback(next, positionMs)
+            vm.report("Trying alternative source: ${next.provider}")
+        }
+    }
     val searchState = rememberSaveableStateHolder()
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var playing by remember { mutableStateOf(false) }
     var showLibrary by rememberSaveable { mutableStateOf(false) }
-    BackHandler(playing || section != Section.HOME || showLibrary) {
-        if (playing) { playing = false; vm.activeStream.value = null }
+    var showTitleDetails by rememberSaveable { mutableStateOf(false) }
+    BackHandler(playing || showTitleDetails || section != Section.HOME || showLibrary) {
+        if (playing) { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null }
+        else if (showTitleDetails) showTitleDetails = false
         else if (showLibrary) showLibrary = false
         else section = Section.HOME
     }
     LaunchedEffect(activeStream) { if (activeStream != null) playing = true }
     if (playing && activeStream != null) {
-        MutinyPlayer(activeStream!!, settings, onExit = { playing = false; vm.activeStream.value = null })
+        val progressKey = vm.activePlaybackKey
+        MutinyPlayer(activeStream!!, settings,
+            onExit = { playing = false; attemptedSources = emptySet(); vm.activeStream.value = null },
+            initialPositionMs = vm.playbackStartMs,
+            onPosition = { positionMs, durationMs -> vm.recordPlayback(progressKey, positionMs, durationMs) },
+            onPlaybackFailure = { stream, positionMs -> nextSource(stream, positionMs) })
         return
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -77,7 +119,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                 if (!expanded) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     Section.entries.forEach { s ->
                         NavigationBarItem(selected = section == s && !showLibrary,
-                            onClick = { section = s; showLibrary = false },
+                            onClick = { section = s; showLibrary = false; showTitleDetails = false },
                             icon = { Text(s.glyph, style = MaterialTheme.typography.titleMedium) },
                             label = { Text(s.display, maxLines = 1) })
                     }
@@ -92,7 +134,7 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                     Spacer(Modifier.height(20.dp))
                     Section.entries.forEach { s ->
                         NavigationRailItem(selected = section == s && !showLibrary,
-                            onClick = { section = s; showLibrary = false },
+                            onClick = { section = s; showLibrary = false; showTitleDetails = false },
                             icon = { Text(s.glyph, style = MaterialTheme.typography.titleLarge) },
                             label = { Text(s.display) })
                     }
@@ -107,22 +149,29 @@ private fun MutinyContent(vm: MutinyViewModel, settings: UserSettings) {
                         }
                     }
                     when {
-                        showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; section = Section.BROWSE })
-                        section == Section.HOME -> HomeScreen(
-                            watchlist = watchlist,
-                            catalog = catalog,
-                            onBrowse = { section = Section.BROWSE },
-                            onSearch = { section = Section.SEARCH },
-                            onSettings = { section = Section.SETTINGS },
-                            onAI = { section = Section.AI },
-                            onLibrary = { showLibrary = true },
-                            onSelectTitle = { vm.loadStreams(it); section = Section.BROWSE },
-                        )
+                        showTitleDetails -> BrowseScreen(vm, settings, addons, detailOnly = true, onBack = { showTitleDetails = false })
+                        showLibrary -> LibraryScreen(vm, onBack = { showLibrary = false }, onBrowse = { showLibrary = false; showTitleDetails = true })
+                        section == Section.HOME -> {
+                            LaunchedEffect(addons, settings.addonUrls, settings.excludedAddonUrls, cloudStatuses) {
+                                vm.refreshHomeCatalogs()
+                            }
+                            HomeScreen(
+                                watchlist = watchlist,
+                                catalog = catalog,
+                                loading = catalogLoading,
+                                onRefresh = { vm.browseCatalogs() },
+                                onSearch = { section = Section.SEARCH },
+                                onSettings = { section = Section.SETTINGS },
+                                onAI = { section = Section.AI },
+                                onLibrary = { showLibrary = true },
+                                onSelectTitle = { showTitleDetails = true; vm.loadStreams(it) },
+                            )
+                        }
                         section == Section.BROWSE -> BrowseScreen(vm, settings, addons)
                         section == Section.SEARCH -> searchState.SaveableStateProvider("catalog-search") {
                             SearchScreen(vm) { item ->
+                                showTitleDetails = true
                                 vm.loadStreams(item)
-                                section = Section.BROWSE
                             }
                         }
                         section == Section.AI -> AiScreen(vm, settings)

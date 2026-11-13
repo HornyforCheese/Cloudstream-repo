@@ -22,6 +22,14 @@ class NetworkTest {
         assertTrue(closed)
         assertEquals("hello", Network.readLimited(ByteArrayInputStream("hello".toByteArray()), 5))
     }
+    @Test fun retriesOnlyTimeoutsAndOnlyOnce() {
+        val timeout = java.net.SocketTimeoutException("read timed out")
+        assertTrue(Network.shouldRetryTimeout(timeout, 0))
+        assertFalse(Network.shouldRetryTimeout(timeout, 1))
+        assertFalse(Network.shouldRetryTimeout(IllegalStateException("HTTP 404"), 0))
+        assertEquals(10_000, Network.CONNECT_TIMEOUT_MS)
+        assertEquals(16_000, Network.READ_TIMEOUT_MS)
+    }
     @Test fun normalizesAddonManifestAndStremioLinks() {
         val client = StremioClient()
         assertEquals("https://example.org/config", client.normalizeBase(" stremio://example.org/config/manifest.json/ "))

@@ -6,11 +6,19 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.InputStream
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import kotlin.coroutines.coroutineContext
 
 object Network {
+    internal const val CONNECT_TIMEOUT_MS = 10_000
+    internal const val READ_TIMEOUT_MS = 16_000
+    internal const val MAX_TIMEOUT_ATTEMPTS = 2
+
+    internal fun shouldRetryTimeout(error: Exception, attempt: Int): Boolean =
+        error is SocketTimeoutException && attempt + 1 < MAX_TIMEOUT_ATTEMPTS
+
     fun validateHttps(url: String): String {
         val uri = URI(url.trim())
         require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null) {
@@ -31,29 +39,44 @@ object Network {
         output.toString(Charsets.UTF_8.name())
     }
 
+    /** Retry timed-out GET requests once; never retry HTTP errors. */
     suspend fun getText(url: String, limitBytes: Int = 2_000_000): String = withContext(Dispatchers.IO) {
-        var target = validateHttps(url)
-        repeat(6) { attempt ->
+        require(limitBytes > 0) { "Response limit must be positive" }
+        var timeout: SocketTimeoutException? = null
+        for (retry in 0 until MAX_TIMEOUT_ATTEMPTS) {
             coroutineContext.ensureActive()
-            val connection = URL(target).openConnection() as HttpURLConnection
             try {
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 16_000
-                connection.instanceFollowRedirects = false
-                connection.setRequestProperty("Accept", "application/json")
-                connection.setRequestProperty("User-Agent", "MutinyMediaAndroid/0.2")
-                val code = connection.responseCode
-                if (code in listOf(301, 302, 303, 307, 308)) {
-                    require(attempt < 5) { "Too many provider redirects" }
-                    val location = connection.getHeaderField("Location") ?: error("Provider redirect has no destination")
-                    target = validateHttps(URL(URL(target), location).toString())
-                } else {
-                    require(code in 200..299) { "Provider returned HTTP $code" }
-                    return@withContext readLimited(connection.inputStream, limitBytes)
+                var target = validateHttps(url)
+                repeat(6) { redirect ->
+                    coroutineContext.ensureActive()
+                    val connection = URL(target).openConnection() as HttpURLConnection
+                    try {
+                        connection.connectTimeout = CONNECT_TIMEOUT_MS
+                        connection.readTimeout = READ_TIMEOUT_MS
+                        connection.instanceFollowRedirects = false
+                        connection.setRequestProperty("Accept", "application/json")
+                        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) MutinyMedia/1.0")
+                        val code = connection.responseCode
+                        if (code in listOf(301, 302, 303, 307, 308)) {
+                            require(redirect < 5) { "Too many provider redirects" }
+                            val location = connection.getHeaderField("Location") ?: error("Provider redirect has no destination")
+                            target = validateHttps(URL(URL(target), location).toString())
+                        } else {
+                            require(code in 200..299) { "Provider returned HTTP $code from ${URL(target).host}" }
+                            return@withContext readLimited(connection.inputStream, limitBytes)
+                        }
+                    } finally { connection.disconnect() }
                 }
-            } finally { connection.disconnect() }
+                error("Too many provider redirects")
+            } catch (e: SocketTimeoutException) {
+                coroutineContext.ensureActive()
+                timeout = e
+                if (!shouldRetryTimeout(e, retry)) break
+            }
         }
-        error("Too many provider redirects")
+        throw SocketTimeoutException("Provider timed out after $MAX_TIMEOUT_ATTEMPTS attempts").apply {
+            timeout?.let { initCause(it) }
+        }
     }
 
     suspend fun getJson(url: String, limitBytes: Int = 2_000_000): JSONObject =
